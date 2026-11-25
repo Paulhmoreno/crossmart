@@ -1,4 +1,9 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { describeError } from '@crossmart/common';
 import {
   CatalogSourceKind,
@@ -25,11 +30,14 @@ import type {
   OdooTestConnectionResult,
 } from '../entities/odoo-connection.js';
 import { ODOO_DEFAULT_PREVIEW_LIMIT, ODOO_MAX_PREVIEW_LIMIT } from '../odoo.constants.js';
+import { buildOdooSourceOrigin } from '../rules/odoo-document-classifier.js';
 import { OdooCredentialsVault } from './odoo-credentials.vault.js';
 
 const CONNECTION_NOT_FOUND = 'No Odoo connection is configured for this workspace.';
 const CREDENTIALS_REQUIRED = 'Enter an Odoo API key to connect.';
 const DOCUMENT_NOT_FOUND = 'Document not found.';
+const INSTANCE_CHANGE_BLOCKED =
+  'No se puede cambiar la URL o base de datos de Odoo mientras existan productos sincronizados de otra instancia, para evitar mezclar identidades de catálogo.';
 const RECENT_RUNS_LIMIT = 10;
 
 export interface UpsertOdooConnectionInput {
@@ -124,6 +132,22 @@ export class OdooConnectionService {
       username: input.username.trim(),
       apiKey,
     };
+
+    if (existing) {
+      const existingOrigin = buildOdooSourceOrigin(existing.url, existing.database);
+      const nextOrigin = buildOdooSourceOrigin(credentials.url, credentials.database);
+      if (existingOrigin !== nextOrigin) {
+        const linkedProducts = await this.prisma.product.count({
+          where: {
+            workspaceId,
+            sourceKind: CatalogSourceKind.ODOO,
+          },
+        });
+        if (linkedProducts > 0) {
+          throw new ConflictException(INSTANCE_CHANGE_BLOCKED);
+        }
+      }
+    }
 
     const discovered = await this.client.discoverInstance(credentials);
     const sealedCredentials = await this.vault.seal(workspaceId, { apiKey });
@@ -241,6 +265,7 @@ export class OdooConnectionService {
       where: {
         workspaceId,
         sourceKind: CatalogSourceKind.ODOO,
+        sourceConnectionId: connection.id,
         sourceExternalId: { in: rows.map((row) => String(row.templateId)) },
       },
       select: { id: true, sourceExternalId: true },
@@ -250,7 +275,6 @@ export class OdooConnectionService {
         item.sourceExternalId ? [[item.sourceExternalId, item.id]] : [],
       ),
     );
-    void connection;
 
     return rows.map((row) => {
       const crossmartProductId = productByExternalId.get(String(row.templateId)) ?? null;
@@ -269,6 +293,7 @@ export class OdooConnectionService {
   ): Promise<{ name: string; mimetype: string; content: Buffer }> {
     const doc = await this.prisma.productDocument.findFirst({
       where: { id: documentId, productId, workspaceId },
+      include: { product: { select: { sourceConnectionId: true } } },
     });
     if (!doc) {
       throw new NotFoundException(DOCUMENT_NOT_FOUND);
@@ -277,7 +302,10 @@ export class OdooConnectionService {
     if (!Number.isInteger(attachmentId) || attachmentId <= 0) {
       throw new NotFoundException(DOCUMENT_NOT_FOUND);
     }
-    const { credentials } = await this.openActiveConnection(workspaceId);
+    const { connection, credentials } = await this.openActiveConnection(workspaceId);
+    if (doc.product.sourceConnectionId && doc.product.sourceConnectionId !== connection.id) {
+      throw new NotFoundException(DOCUMENT_NOT_FOUND);
+    }
     const file = await this.client.readAttachmentContent(credentials, attachmentId);
     if (!file) {
       throw new NotFoundException(DOCUMENT_NOT_FOUND);
@@ -342,7 +370,11 @@ export class OdooConnectionService {
   private async toView(connection: OdooConnection): Promise<OdooConnectionView> {
     const [syncedProductCount, recentRuns] = await Promise.all([
       this.prisma.product.count({
-        where: { workspaceId: connection.workspaceId, sourceKind: CatalogSourceKind.ODOO },
+        where: {
+          workspaceId: connection.workspaceId,
+          sourceKind: CatalogSourceKind.ODOO,
+          sourceConnectionId: connection.id,
+        },
       }),
       this.prisma.odooSyncRun.findMany({
         where: { connectionId: connection.id },

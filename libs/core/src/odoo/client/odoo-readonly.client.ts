@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { describeError } from '@crossmart/common';
 import { ODOO_READ_ONLY_METHODS, ODOO_RPC_TIMEOUT_MS, OdooStockField } from '../odoo.constants.js';
 import type {
   OdooAdvancedSettings,
@@ -31,11 +32,22 @@ interface OdooFieldMeta {
 export interface OdooAttachmentRecord {
   id: number;
   documentId: number | null;
+  /** True when read from Odoo's `product.document` relation; false for loose `ir.attachment` rows. */
+  fromProductDocument: boolean;
+  /** Variant ID (`product.product`) when attached directly to a variant; null for template-level files. */
+  variantId: number | null;
+  attachedOnSale: string | null;
   name: string;
   mimetype: string;
   fileSize: number | null;
   isPublic: boolean;
   datasBase64: string | null;
+}
+
+export interface OdooAttachmentBatchResult {
+  byTemplate: Map<number, OdooAttachmentRecord[]>;
+  loaded: boolean;
+  error: string | null;
 }
 
 export interface OdooVariantSnapshot {
@@ -70,6 +82,9 @@ export interface OdooTemplateSnapshot {
   mainImageBase64: string | null;
   variants: OdooVariantSnapshot[];
   attachments: OdooAttachmentRecord[];
+  /** False when reading product documents/attachments from Odoo failed transiently. */
+  attachmentsLoaded: boolean;
+  attachmentError: string | null;
   customFieldValues: Record<string, unknown>;
 }
 
@@ -501,10 +516,26 @@ export class OdooReadOnlyClient {
           )
         : [];
 
-    const attachmentsByTemplate = await this.fetchAttachmentsForTemplates(
+    const variantToTemplate = new Map<number, number>();
+    const variantsByTemplate = new Map<number, Record<string, unknown>[]>();
+    for (const variant of variantsRaw) {
+      const tmplId = Array.isArray(variant.product_tmpl_id)
+        ? Number(variant.product_tmpl_id[0])
+        : 0;
+      const variantId = Number(variant.id);
+      if (tmplId && variantId) {
+        variantToTemplate.set(variantId, tmplId);
+      }
+      const list = variantsByTemplate.get(tmplId) ?? [];
+      list.push(variant);
+      variantsByTemplate.set(tmplId, list);
+    }
+
+    const attachmentBatch = await this.fetchAttachmentsForTemplates(
       session,
       templateIds,
       allVariantIds,
+      variantToTemplate,
       hasDocuments,
     );
 
@@ -529,16 +560,6 @@ export class OdooReadOnlyClient {
       const list = attrLinesByTemplate.get(tmplId) ?? [];
       list.push({ attributeId: attrId, name: attrName });
       attrLinesByTemplate.set(tmplId, list);
-    }
-
-    const variantsByTemplate = new Map<number, Record<string, unknown>[]>();
-    for (const variant of variantsRaw) {
-      const tmplId = Array.isArray(variant.product_tmpl_id)
-        ? Number(variant.product_tmpl_id[0])
-        : 0;
-      const list = variantsByTemplate.get(tmplId) ?? [];
-      list.push(variant);
-      variantsByTemplate.set(tmplId, list);
     }
 
     return templates.map((tmpl) => {
@@ -606,7 +627,9 @@ export class OdooReadOnlyClient {
         optionNames,
         mainImageBase64: optionalText(tmpl.image_1920),
         variants,
-        attachments: attachmentsByTemplate.get(templateId) ?? [],
+        attachments: attachmentBatch.byTemplate.get(templateId) ?? [],
+        attachmentsLoaded: attachmentBatch.loaded,
+        attachmentError: attachmentBatch.error,
         customFieldValues,
       };
     });
@@ -642,114 +665,163 @@ export class OdooReadOnlyClient {
     session: OdooSession,
     templateIds: number[],
     variantIds: number[],
+    variantToTemplate: Map<number, number>,
     hasDocuments: boolean,
-  ): Promise<Map<number, OdooAttachmentRecord[]>> {
+  ): Promise<OdooAttachmentBatchResult> {
     const result = new Map<number, OdooAttachmentRecord[]>();
     const seenAttachmentIds = new Set<number>();
 
     const addToTemplate = (templateId: number, record: OdooAttachmentRecord): void => {
-      if (seenAttachmentIds.has(record.id)) return;
+      if (!templateId || seenAttachmentIds.has(record.id)) return;
       seenAttachmentIds.add(record.id);
       const list = result.get(templateId) ?? [];
       list.push(record);
       result.set(templateId, list);
     };
 
-    // 1. Read `product.document` records linked to product.template
-    if (hasDocuments) {
-      const docs = await this.safeReadModel<Record<string, unknown>>(
-        session,
-        'product.document',
-        'search_read',
-        [
-          [
-            ['active', '=', true],
+    const resolveTarget = (
+      resModel: unknown,
+      resId: unknown,
+    ): { templateId: number; variantId: number | null } => {
+      const numericId = Number(resId);
+      if (resModel === 'product.product') {
+        return { templateId: variantToTemplate.get(numericId) ?? 0, variantId: numericId };
+      }
+      return { templateId: numericId, variantId: null };
+    };
+
+    const targetDomain: OdooDomainTerm[] =
+      variantIds.length > 0
+        ? [
+            '|',
+            '&',
             ['res_model', '=', 'product.template'],
             ['res_id', 'in', templateIds],
-          ],
-        ],
+            '&',
+            ['res_model', '=', 'product.product'],
+            ['res_id', 'in', variantIds],
+          ]
+        : [
+            ['res_model', '=', 'product.template'],
+            ['res_id', 'in', templateIds],
+          ];
+
+    try {
+      // 1. Read `product.document` records linked to `product.template` AND `product.product`
+      if (hasDocuments) {
+        const docFieldMeta = await this.executeRead<Record<string, OdooFieldMeta>>(
+          session,
+          'product.document',
+          'fields_get',
+          [],
+          { attributes: ['type'] },
+        );
+        const docFields = [
+          'id',
+          'name',
+          'res_model',
+          'res_id',
+          'mimetype',
+          'file_size',
+          'ir_attachment_id',
+          'type',
+          'sequence',
+          ...('attached_on_sale' in docFieldMeta ? ['attached_on_sale'] : []),
+        ];
+
+        const docs = await this.readModel<Record<string, unknown>>(
+          session,
+          'product.document',
+          'search_read',
+          [[['active', '=', true], ...targetDomain]],
+          { fields: docFields, order: 'sequence asc, id asc' },
+        );
+
+        const attIds = [
+          ...new Set(
+            docs.flatMap((doc) =>
+              Array.isArray(doc.ir_attachment_id) ? [Number(doc.ir_attachment_id[0])] : [],
+            ),
+          ),
+        ];
+        const attMap = new Map<number, Record<string, unknown>>();
+        if (attIds.length > 0) {
+          const atts = await this.readModel<Record<string, unknown>>(
+            session,
+            'ir.attachment',
+            'read',
+            [attIds],
+            { fields: ['id', 'name', 'mimetype', 'file_size', 'public', 'datas'] },
+          );
+          for (const att of atts) attMap.set(Number(att.id), att);
+          if (attMap.size < attIds.length) {
+            return {
+              byTemplate: result,
+              loaded: false,
+              error: 'No se pudieron leer todos los archivos adjuntos de product.document en Odoo.',
+            };
+          }
+        }
+
+        for (const doc of docs) {
+          const attId = Array.isArray(doc.ir_attachment_id) ? Number(doc.ir_attachment_id[0]) : 0;
+          if (!attId) continue;
+          const att = attMap.get(attId);
+          const { templateId, variantId } = resolveTarget(doc.res_model, doc.res_id);
+          addToTemplate(templateId, {
+            id: attId,
+            documentId: Number(doc.id),
+            fromProductDocument: true,
+            variantId,
+            attachedOnSale: optionalText(doc.attached_on_sale),
+            name: optionalText(doc.name) ?? optionalText(att?.name) ?? `attachment-${attId}`,
+            mimetype:
+              optionalText(att?.mimetype) ??
+              optionalText(doc.mimetype) ??
+              'application/octet-stream',
+            fileSize: optionalNumber(att?.file_size) ?? optionalNumber(doc.file_size),
+            isPublic: Boolean(att?.public),
+            datasBase64: optionalText(att?.datas),
+          });
+        }
+      }
+
+      // 2. Inspect loose `ir.attachment` rows on template/variant (kept strictly private, never gallery)
+      const directAtts = await this.readModel<Record<string, unknown>>(
+        session,
+        'ir.attachment',
+        'search_read',
+        [[...targetDomain, ['res_field', '=', false], ['type', '=', 'binary']]],
         {
-          fields: [
-            'id',
-            'name',
-            'res_id',
-            'mimetype',
-            'file_size',
-            'ir_attachment_id',
-            'type',
-            'sequence',
-          ],
-          order: 'sequence asc, id asc',
+          fields: ['id', 'name', 'res_model', 'res_id', 'mimetype', 'file_size', 'public', 'datas'],
         },
       );
 
-      const attIds = docs.flatMap((doc) =>
-        Array.isArray(doc.ir_attachment_id) ? [Number(doc.ir_attachment_id[0])] : [],
-      );
-      const attMap = new Map<number, Record<string, unknown>>();
-      if (attIds.length > 0) {
-        const atts = await this.safeReadModel<Record<string, unknown>>(
-          session,
-          'ir.attachment',
-          'read',
-          [attIds],
-          { fields: ['id', 'name', 'mimetype', 'file_size', 'public', 'datas'] },
-        );
-        for (const att of atts) attMap.set(Number(att.id), att);
-      }
-
-      for (const doc of docs) {
-        const attId = Array.isArray(doc.ir_attachment_id) ? Number(doc.ir_attachment_id[0]) : 0;
-        if (!attId) continue;
-        const att = attMap.get(attId);
-        const templateId = Number(doc.res_id);
+      for (const att of directAtts) {
+        const attId = Number(att.id);
+        const { templateId, variantId } = resolveTarget(att.res_model, att.res_id);
         addToTemplate(templateId, {
           id: attId,
-          documentId: Number(doc.id),
-          name: optionalText(doc.name) ?? optionalText(att?.name) ?? `attachment-${attId}`,
-          mimetype:
-            optionalText(att?.mimetype) ?? optionalText(doc.mimetype) ?? 'application/octet-stream',
-          fileSize: optionalNumber(att?.file_size) ?? optionalNumber(doc.file_size),
-          isPublic: Boolean(att?.public),
-          datasBase64: optionalText(att?.datas),
+          documentId: null,
+          fromProductDocument: false,
+          variantId,
+          attachedOnSale: null,
+          name: optionalText(att.name) ?? `attachment-${attId}`,
+          mimetype: optionalText(att.mimetype) ?? 'application/octet-stream',
+          fileSize: optionalNumber(att.file_size),
+          isPublic: Boolean(att.public),
+          datasBase64: optionalText(att.datas),
         });
       }
+
+      return { byTemplate: result, loaded: true, error: null };
+    } catch (error) {
+      return {
+        byTemplate: result,
+        loaded: false,
+        error: describeError(error),
+      };
     }
-
-    // 2. Also inspect direct ir.attachment rows on product.template (excluding res_field image caches)
-    const directAtts = await this.safeReadModel<Record<string, unknown>>(
-      session,
-      'ir.attachment',
-      'search_read',
-      [
-        [
-          ['res_model', '=', 'product.template'],
-          ['res_id', 'in', templateIds],
-          ['res_field', '=', false],
-          ['type', '=', 'binary'],
-        ],
-      ],
-      { fields: ['id', 'name', 'res_id', 'mimetype', 'file_size', 'public', 'datas'] },
-    );
-
-    for (const att of directAtts) {
-      const attId = Number(att.id);
-      const templateId = Number(att.res_id);
-      addToTemplate(templateId, {
-        id: attId,
-        documentId: null,
-        name: optionalText(att.name) ?? `attachment-${attId}`,
-        mimetype: optionalText(att.mimetype) ?? 'application/octet-stream',
-        fileSize: optionalNumber(att.file_size),
-        isPublic: Boolean(att.public),
-        datasBase64: optionalText(att.datas),
-      });
-    }
-
-    // Keep variantIds referenced cleanly (future variant-level attachments if present)
-    void variantIds;
-
-    return result;
   }
 
   private resolveBrandField(

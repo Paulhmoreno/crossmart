@@ -4,7 +4,8 @@ import { ODOO_SUPPORTED_IMAGE_MIMETYPES } from '../odoo.constants.js';
 
 const DATASHEET_PATTERN = /ficha|datasheet|spec|especificaci|tecnic|technical|catalog/i;
 const MANUAL_PATTERN = /manual|guia|guide|instrucc|user.?guide|handbook|quickstart/i;
-const INTERNAL_PATTERN = /interno|internal|cost|precio|factura|invoice|proveedor|supplier|confid/i;
+const INTERNAL_PATTERN =
+  /interno|internal|cost|costo|precio|lista.?precio|factura|invoice|recibo|receipt|comprobante|boleta|proforma|cotizaci|quote|presupuesto|proveedor|supplier|vendor|compra|purchase|orden.?compra|pedido|bodega|almacen|warehouse|inventario|guia.?remision|despacho|etiqueta|confid|privad|private|secret|contrato|contract|cedul|ruc|sri|retencion|nota.?venta|nota.?credito|captura|screenshot|screen.?shot|whatsapp|pago|transferencia|deposito|banco|cheque/i;
 
 const MEDIA_HASH_PREFIX_LENGTH = 16;
 const DECIMAL_PLACES = 2;
@@ -16,18 +17,28 @@ export interface ClassifiedAttachment {
   documentKind: ProductDocumentKind;
 }
 
+export interface AttachmentClassificationContext {
+  /** True only when the file is registered in Odoo's `product.document` relation (not a loose chatter attachment). */
+  fromProductDocument: boolean;
+  /** Value of Odoo's `product.document.attached_on_sale` field when present. */
+  attachedOnSale?: string | null;
+}
+
 /**
- * Classifies an Odoo `product.document` / `ir.attachment` entry:
- * - Supported raster images (JPEG, PNG, WebP, GIF) without internal-file names are eligible
- *   as commercial photos copied through Crossmart's native media pipeline.
- * - Non-image files (PDFs, Office docs, etc.) are classified as private reference documents
- *   and never auto-published as storefront product images.
+ * Classifies an Odoo `product.document` / `ir.attachment` entry conservatively:
+ * - Any file whose name matches internal/confidential, manual, or datasheet patterns is ALWAYS
+ *   kept private (even when stored as an image) and never added to the commercial gallery.
+ * - Loose `ir.attachment` rows not registered in `product.document` are kept private (`INTERNAL`).
+ * - Quote-embedded `product.document` files (`attached_on_sale = 'inside'`) stay private (`DATASHEET`).
+ * - Only supported raster images explicitly registered in `product.document` without sensitive/technical
+ *   names are eligible for Crossmart's commercial gallery.
  */
-export function classifyOdooAttachment(name: string, mimetype: string): ClassifiedAttachment {
+export function classifyOdooAttachment(
+  name: string,
+  mimetype: string,
+  context: AttachmentClassificationContext = { fromProductDocument: false },
+): ClassifiedAttachment {
   const normalizedMime = mimetype.trim().toLowerCase();
-  if (ODOO_SUPPORTED_IMAGE_MIMETYPES.has(normalizedMime) && !INTERNAL_PATTERN.test(name)) {
-    return { isCommercialImage: true, documentKind: ProductDocumentKind.OTHER };
-  }
   if (INTERNAL_PATTERN.test(name)) {
     return { isCommercialImage: false, documentKind: ProductDocumentKind.INTERNAL };
   }
@@ -37,10 +48,38 @@ export function classifyOdooAttachment(name: string, mimetype: string): Classifi
   if (DATASHEET_PATTERN.test(name)) {
     return { isCommercialImage: false, documentKind: ProductDocumentKind.DATASHEET };
   }
+  if (!context.fromProductDocument) {
+    return {
+      isCommercialImage: false,
+      documentKind:
+        normalizedMime === 'application/pdf'
+          ? ProductDocumentKind.DATASHEET
+          : ProductDocumentKind.INTERNAL,
+    };
+  }
+  if (context.attachedOnSale === 'inside') {
+    return { isCommercialImage: false, documentKind: ProductDocumentKind.DATASHEET };
+  }
+  if (ODOO_SUPPORTED_IMAGE_MIMETYPES.has(normalizedMime)) {
+    return { isCommercialImage: true, documentKind: ProductDocumentKind.OTHER };
+  }
   if (normalizedMime === 'application/pdf') {
     return { isCommercialImage: false, documentKind: ProductDocumentKind.DATASHEET };
   }
   return { isCommercialImage: false, documentKind: ProductDocumentKind.INTERNAL };
+}
+
+/**
+ * Canonical origin fingerprint `(normalized URL + database)` used to prevent mixing
+ * product external IDs from different Odoo instances or databases.
+ */
+export function buildOdooSourceOrigin(rawUrl: string, database: string): string {
+  const trimmedUrl = rawUrl.trim().replace(/\/+$/, '');
+  const parsed = new URL(trimmedUrl);
+  const normalizedPath = parsed.pathname.replace(/\/+$/, '');
+  const normalizedOrigin = `${parsed.protocol.toLowerCase()}//${parsed.host.toLowerCase()}${normalizedPath}`;
+  const normalizedDb = database.trim().toLowerCase();
+  return `${normalizedOrigin}#${normalizedDb}`;
 }
 
 export function sha256Hex(buffer: Buffer): string {

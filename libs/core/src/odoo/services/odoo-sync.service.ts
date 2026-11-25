@@ -41,6 +41,7 @@ import { ODOO_MAX_SYNC_ISSUES } from '../odoo.constants.js';
 import { OdooSyncQueue } from '../queue/odoo-sync.queue.js';
 import {
   buildOdooMediaKey,
+  buildOdooSourceOrigin,
   classifyOdooAttachment,
   formatOdooDecimal,
   kgToGrams,
@@ -69,9 +70,11 @@ function slugifyHandle(input: string, fallbackId: number): string {
 function buildSourceMetadata(
   template: OdooTemplateSnapshot,
   currency: string,
+  sourceOrigin: string,
   syncedAt: Date,
 ): Prisma.InputJsonValue {
   return {
+    sourceOrigin,
     originalName: template.name,
     originalBrand: template.brand,
     originalCategory: template.category,
@@ -82,6 +85,12 @@ function buildSourceMetadata(
     customFields: template.customFieldValues,
     lastSyncedAt: syncedAt.toISOString(),
   } as Prisma.InputJsonValue;
+}
+
+function readStoredSourceOrigin(raw: Prisma.JsonValue | null | undefined): string | null {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const value = (raw as Record<string, unknown>).sourceOrigin;
+  return typeof value === 'string' && value.length > 0 ? value : null;
 }
 
 @Injectable()
@@ -197,6 +206,7 @@ export class OdooSyncService {
       });
 
       const currency = settings.discovered?.currency ?? 'USD';
+      const sourceOrigin = buildOdooSourceOrigin(credentials.url, credentials.database);
 
       for (let offset = 0; offset < templateIds.length; offset += BATCH_SIZE) {
         const chunk = templateIds.slice(offset, offset + BATCH_SIZE);
@@ -207,10 +217,21 @@ export class OdooSyncService {
             const outcome = await this.syncTemplate(
               job.workspaceId,
               connection.id,
+              sourceOrigin,
               snapshot,
               settings,
               currency,
             );
+            if (outcome.warning) {
+              failedCount += 1;
+              if (issues.length < ODOO_MAX_SYNC_ISSUES) {
+                issues.push({
+                  externalId: String(snapshot.id),
+                  name: snapshot.name,
+                  message: outcome.warning,
+                });
+              }
+            }
             if (outcome.action === 'created') createdCount += 1;
             else if (outcome.action === 'updated') updatedCount += 1;
             else skippedCount += 1;
@@ -246,11 +267,19 @@ export class OdooSyncService {
       }
 
       const finishedAt = new Date();
+      const allFailed = failedCount > 0 && createdCount === 0 && updatedCount === 0;
+      const finalStatus = allFailed ? OdooSyncRunStatus.FAILED : OdooSyncRunStatus.COMPLETED;
+      const runErrorMessage =
+        failedCount > 0
+          ? (issues[0]?.message ?? `Sincronización completada con ${failedCount} incidencia(s).`)
+          : null;
+
       await this.prisma.$transaction([
         this.prisma.odooSyncRun.update({
           where: { id: run.id },
           data: {
-            status: OdooSyncRunStatus.COMPLETED,
+            status: finalStatus,
+            errorMessage: runErrorMessage,
             processedCount,
             createdCount,
             updatedCount,
@@ -321,18 +350,24 @@ export class OdooSyncService {
   private async syncTemplate(
     workspaceId: string,
     connectionId: string,
+    sourceOrigin: string,
     template: OdooTemplateSnapshot,
     settings: { stockField?: import('../odoo.constants.js').OdooStockField },
     currency: string,
-  ): Promise<{ action: 'created' | 'updated' | 'skipped'; productId: string | null }> {
+  ): Promise<{
+    action: 'created' | 'updated' | 'skipped';
+    productId: string | null;
+    warning: string | null;
+  }> {
     const externalId = String(template.id);
     const syncedAt = new Date();
-    const sourceMetadata = buildSourceMetadata(template, currency, syncedAt);
+    const sourceMetadata = buildSourceMetadata(template, currency, sourceOrigin, syncedAt);
 
     const existing = await this.prisma.product.findFirst({
       where: {
         workspaceId,
         sourceKind: CatalogSourceKind.ODOO,
+        sourceConnectionId: connectionId,
         sourceExternalId: externalId,
       },
       include: {
@@ -341,6 +376,15 @@ export class OdooSyncService {
         documents: true,
       },
     });
+
+    if (existing) {
+      const storedOrigin = readStoredSourceOrigin(existing.sourceMetadata);
+      if (storedOrigin && storedOrigin !== sourceOrigin) {
+        throw new Error(
+          `Product external ID ${externalId} belongs to a different Odoo instance (${storedOrigin})`,
+        );
+      }
+    }
 
     const variantsToSync: OdooVariantSnapshot[] =
       template.variants.length > 0
@@ -378,11 +422,8 @@ export class OdooSyncService {
     }
 
     // Prepare media candidates & private document classifications
-    const { desiredMedia, desiredDocuments } = await this.prepareMediaAndDocuments(
-      workspaceId,
-      template,
-      existing?.media ?? [],
-    );
+    const { desiredMedia, desiredDocuments, preserveExistingDocuments, warning } =
+      await this.prepareMediaAndDocuments(workspaceId, template, existing?.media ?? []);
 
     if (!existing) {
       const handle = await this.allocateUniqueHandle(workspaceId, template.name, template.id);
@@ -466,7 +507,7 @@ export class OdooSyncService {
         },
         select: { id: true },
       });
-      return { action: 'created', productId: created.id };
+      return { action: 'created', productId: created.id, warning };
     }
 
     // Repeat sync: preserve commercial fields (`title`, `descriptionHtml`, `tags`, `productType`,
@@ -614,47 +655,50 @@ export class OdooSyncService {
         });
       }
 
-      // Upsert private reference documents (datasheets, manuals, internal files)
-      const desiredDocIds = desiredDocuments.map((doc) => doc.sourceExternalId);
-      await tx.productDocument.deleteMany({
-        where: {
-          productId: existing.id,
-          workspaceId,
-          ...(desiredDocIds.length > 0 ? { sourceExternalId: { notIn: desiredDocIds } } : {}),
-        },
-      });
-      for (const doc of desiredDocuments) {
-        await tx.productDocument.upsert({
+      // Upsert private reference documents ONLY when Odoo document read succeeded.
+      // On transient read failure, keep previously synced ProductDocument rows intact.
+      if (!preserveExistingDocuments) {
+        const desiredDocIds = desiredDocuments.map((doc) => doc.sourceExternalId);
+        await tx.productDocument.deleteMany({
           where: {
-            productId_sourceExternalId: {
-              productId: existing.id,
-              sourceExternalId: doc.sourceExternalId,
-            },
-          },
-          create: {
-            workspaceId,
             productId: existing.id,
-            sourceExternalId: doc.sourceExternalId,
-            name: doc.name,
-            mimetype: doc.mimetype,
-            byteSize: doc.byteSize,
-            kind: doc.kind,
-            isPublic: doc.isPublic,
-            checksum: doc.checksum,
-          },
-          update: {
-            name: doc.name,
-            mimetype: doc.mimetype,
-            byteSize: doc.byteSize,
-            kind: doc.kind,
-            isPublic: doc.isPublic,
-            checksum: doc.checksum,
+            workspaceId,
+            ...(desiredDocIds.length > 0 ? { sourceExternalId: { notIn: desiredDocIds } } : {}),
           },
         });
+        for (const doc of desiredDocuments) {
+          await tx.productDocument.upsert({
+            where: {
+              productId_sourceExternalId: {
+                productId: existing.id,
+                sourceExternalId: doc.sourceExternalId,
+              },
+            },
+            create: {
+              workspaceId,
+              productId: existing.id,
+              sourceExternalId: doc.sourceExternalId,
+              name: doc.name,
+              mimetype: doc.mimetype,
+              byteSize: doc.byteSize,
+              kind: doc.kind,
+              isPublic: doc.isPublic,
+              checksum: doc.checksum,
+            },
+            update: {
+              name: doc.name,
+              mimetype: doc.mimetype,
+              byteSize: doc.byteSize,
+              kind: doc.kind,
+              isPublic: doc.isPublic,
+              checksum: doc.checksum,
+            },
+          });
+        }
       }
     });
 
-    return { action: 'updated', productId: existing.id };
+    return { action: 'updated', productId: existing.id, warning };
   }
 
   private async prepareMediaAndDocuments(
@@ -677,6 +721,8 @@ export class OdooSyncService {
       isPublic: boolean;
       checksum: string | null;
     }[];
+    preserveExistingDocuments: boolean;
+    warning: string | null;
   }> {
     const existingUrlByKey = new Map<string, string>();
     for (const media of existingMedia) {
@@ -687,6 +733,7 @@ export class OdooSyncService {
 
     const desiredMedia: { url: string; altText: string | null; sourceKey: string }[] = [];
     const seenHashes = new Set<string>();
+    const warnings: string[] = [];
 
     const addImageIfNew = async (
       prefix: string,
@@ -710,9 +757,9 @@ export class OdooSyncService {
         const uploaded = await this.media.uploadProductImage(workspaceId, buffer);
         desiredMedia.push({ url: uploaded.url, altText, sourceKey });
       } catch (error) {
-        this.logger.warn(
-          `Skipped invalid/unsupported Odoo image (${sourceKey}): ${describeError(error)}`,
-        );
+        const reason = describeError(error);
+        warnings.push(`No se pudo copiar la imagen (${altText}): ${reason}`);
+        this.logger.warn(`Skipped invalid/unsupported Odoo image (${sourceKey}): ${reason}`);
       }
     };
 
@@ -732,7 +779,8 @@ export class OdooSyncService {
       }
     }
 
-    // 3. `product.document` & `ir.attachment` entries: separate commercial photos vs technical docs
+    // 3. `product.document` & `ir.attachment` entries:
+    // If Odoo document loading failed transiently, preserve all existing document photos and records.
     const desiredDocuments: {
       sourceExternalId: string;
       name: string;
@@ -743,8 +791,33 @@ export class OdooSyncService {
       checksum: string | null;
     }[] = [];
 
+    if (!template.attachmentsLoaded) {
+      for (const media of existingMedia) {
+        if (media.sourceManaged && media.sourceKey?.startsWith('odoo:doc:')) {
+          desiredMedia.push({
+            url: media.url,
+            altText: media.altText,
+            sourceKey: media.sourceKey,
+          });
+        }
+      }
+      const detail = template.attachmentError ?? 'error temporal de lectura en Odoo';
+      warnings.push(
+        `No se pudieron leer los documentos de Odoo; se conservaron las fotos y documentos previos (${detail}).`,
+      );
+      return {
+        desiredMedia,
+        desiredDocuments,
+        preserveExistingDocuments: true,
+        warning: warnings.join(' '),
+      };
+    }
+
     for (const attachment of template.attachments) {
-      const classification = classifyOdooAttachment(attachment.name, attachment.mimetype);
+      const classification = classifyOdooAttachment(attachment.name, attachment.mimetype, {
+        fromProductDocument: attachment.fromProductDocument,
+        attachedOnSale: attachment.attachedOnSale,
+      });
       if (classification.isCommercialImage && attachment.datasBase64) {
         await addImageIfNew('doc', attachment.id, attachment.datasBase64, attachment.name);
       } else {
@@ -763,7 +836,12 @@ export class OdooSyncService {
       }
     }
 
-    return { desiredMedia, desiredDocuments };
+    return {
+      desiredMedia,
+      desiredDocuments,
+      preserveExistingDocuments: false,
+      warning: warnings.length > 0 ? warnings.join(' ') : null,
+    };
   }
 
   private async allocateUniqueHandle(
