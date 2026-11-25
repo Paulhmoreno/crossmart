@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, Logger } from '@nestjs/common';
+import { BadRequestException, HttpException, Injectable, Logger } from '@nestjs/common';
 import { performance } from 'node:perf_hooks';
 import { z } from 'zod';
 import { describeError } from '@crossmart/common';
@@ -29,7 +29,10 @@ import { AiKeyRejectedError, AiNotConfiguredError } from '../errors/ai.errors.js
 import { AiProvider } from '../providers/ai-provider.js';
 import { AnthropicAiProvider } from '../providers/anthropic/anthropic-ai.provider.js';
 import { AnthropicClientFactory } from '../providers/anthropic/anthropic-client.factory.js';
-import { OpenAiCompatibleAiProvider } from '../providers/openai-compatible/openai-compatible-ai.provider.js';
+import {
+  AiDiagnosticError,
+  OpenAiCompatibleAiProvider,
+} from '../providers/openai-compatible/openai-compatible-ai.provider.js';
 import { normalizeOpenAiBaseUrl } from '../providers/openai-compatible/openai-compatible-url.js';
 import { AiCredentialsVault } from './ai-credentials.vault.js';
 
@@ -73,6 +76,12 @@ function providerLabel(provider: AiProviderName): string {
 }
 
 function truncateError(error: unknown): string {
+  if (error instanceof AiDiagnosticError) {
+    return error.message.slice(0, MAX_STORED_ERROR_LENGTH);
+  }
+  if (error instanceof HttpException) {
+    return error.message.slice(0, MAX_STORED_ERROR_LENGTH);
+  }
   return describeError(error).slice(0, MAX_STORED_ERROR_LENGTH);
 }
 
@@ -155,9 +164,15 @@ export class AiConfigService {
 
   async testConfig(workspaceId: string, input: TestAiConfigInput): Promise<TestAiConfigResult> {
     const startedAt = performance.now();
+    const existing = await this.prisma.workspaceAiConfig.findUnique({ where: { workspaceId } });
+    let resolvedForSave: {
+      provider: AiProviderName;
+      baseUrl: string | null;
+      model: string;
+    } | null = null;
     try {
-      const existing = await this.prisma.workspaceAiConfig.findUnique({ where: { workspaceId } });
       const resolved = await this.resolveInputs(workspaceId, existing, input);
+      resolvedForSave = resolved;
       const result = await this.probeProvider(
         resolved.provider,
         resolved.baseUrl,
@@ -177,10 +192,15 @@ export class AiConfigService {
     } catch (error) {
       const latencyMs = Math.round(performance.now() - startedAt);
       const message = truncateError(error);
-      await this.prisma.workspaceAiConfig.updateMany({
-        where: { workspaceId },
-        data: { lastTestedAt: new Date(), lastError: message },
-      });
+      if (resolvedForSave) {
+        await this.updateTestMetadata(
+          workspaceId,
+          existing,
+          resolvedForSave,
+          parseCapabilities(existing?.capabilities),
+          message,
+        );
+      }
       return {
         ok: false,
         provider: input.provider,

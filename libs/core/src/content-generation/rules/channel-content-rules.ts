@@ -67,6 +67,15 @@ const MERCADO_LIBRE_GUIDANCE: ChannelContentGuidance = {
   ],
 };
 
+const WOOCOMMERCE_GUIDANCE: ChannelContentGuidance = {
+  channelName: 'WooCommerce (la tienda en línea propia del comercio)',
+  guidance: [
+    'Escribe un título comercial claro y natural en español (nunca en MAYÚSCULAS sostenidas): tipo de producto, marca confirmada, modelo y atributo clave.',
+    'La descripción larga es HTML estructurado para una ficha de tienda en línea: párrafo breve de presentación y usos, lista <ul> de características confirmadas y lista <ul> de beneficios prácticos, usando <h3> para separar secciones.',
+    'Usa un tono comercial natural para compradores en Ecuador y Latinoamérica; evita promesas no verificadas, precios o condiciones de envío dentro de la descripción.',
+  ],
+};
+
 /**
  * The catalog: the merchant's own product content, which every store starts from. It is
  * written channel-neutral, for the merchant's site and as the base the stores adapt.
@@ -78,8 +87,8 @@ export const CATALOG_CONTENT_RULES: ChannelContentRules = {
   descriptionFormat: DescriptionFormat.RichHtml,
   allowsLinks: false,
   guidance: [
-    'Write a clear, descriptive title: product name first, then the attributes that tell variants and similar products apart. No promotional words.',
-    'The description is HTML for any sales channel: a short intro paragraph, then a <ul> of features and specifications. No links, prices, shipping or store-specific details.',
+    'Write a clear, natural commercial title (never ALL CAPS): product type, confirmed brand, model and key distinguishing attribute. No promotional words or brand repetition.',
+    'The description is structured HTML for any sales channel: a clear intro paragraph with practical applications, then <h3>Características principales</h3><ul>...</ul> (verified facts only) and <h3>Beneficios</h3><ul>...</ul> (prudent buyer benefits). No links, prices, shipping or store-specific details.',
   ],
 };
 
@@ -91,6 +100,7 @@ export const CHANNEL_CONTENT_GUIDANCE: Readonly<
   Partial<Record<ChannelType, ChannelContentGuidance>>
 > = {
   [ChannelType.Shopify]: SHOPIFY_GUIDANCE,
+  [ChannelType.WooCommerce]: WOOCOMMERCE_GUIDANCE,
   [ChannelType.Ebay]: EBAY_GUIDANCE,
   [ChannelType.GoogleMerchant]: GOOGLE_MERCHANT_GUIDANCE,
   [ChannelType.Etsy]: ETSY_GUIDANCE,

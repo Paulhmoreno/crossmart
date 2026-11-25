@@ -14,6 +14,7 @@ import {
   CONTENT_DRAFT_TEXT_MAX_LENGTH,
   type ContentDraft,
   ContentField,
+  ContentQualityTier,
 } from '@crossmart/core';
 import { CONTENT_FIELD_SCHEMA_NAME } from '../ai.constants.js';
 
@@ -77,6 +78,34 @@ export class ContentDraftDto implements ContentDraft {
 
   @ApiProperty({ type: String, nullable: true, description: 'Null when not asked for' })
   descriptionHtml: string | null;
+
+  @ApiPropertyOptional({
+    type: String,
+    nullable: true,
+    description: 'Plain-text commercial summary when requested',
+  })
+  shortDescription?: string | null;
+
+  @ApiPropertyOptional({
+    type: [String],
+    nullable: true,
+    description: 'Suggested commercial search tags when requested',
+  })
+  tags?: string[] | null;
+
+  @ApiPropertyOptional({
+    enum: ContentQualityTier,
+    nullable: true,
+    description: 'Commercial verification tier for the generated draft',
+  })
+  qualityTier?: ContentQualityTier | null;
+
+  @ApiPropertyOptional({
+    type: String,
+    nullable: true,
+    description: 'Short explanation of the assigned quality tier',
+  })
+  qualityNote?: string | null;
 
   static from(draft: ContentDraft): ContentDraftDto {
     return Object.assign(new ContentDraftDto(), draft);

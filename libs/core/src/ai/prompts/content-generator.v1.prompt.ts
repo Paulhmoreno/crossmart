@@ -16,6 +16,20 @@ export interface ContentGeneratorProduct {
   tags: string[];
   optionNames: string[];
   optionValues: string[];
+  /** Original ERP display name (safe commercial reference only, never private URLs or costs). */
+  sourceOriginalName?: string | null;
+  /** Original ERP category hierarchy label, when present. */
+  sourceOriginalCategory?: string | null;
+  /** Unique variant SKUs (never internal costs). */
+  skus?: string[];
+  /** Unique variant EAN/UPC/GTIN barcodes. */
+  barcodes?: string[];
+  /** Positive product weight in grams, when known. */
+  weightGrams?: number | null;
+  /** Count of product photos currently available. */
+  photoCount?: number;
+  /** Filenames of authorized public technical documents only (never internal or confidential files). */
+  technicalDocuments?: string[];
 }
 
 export interface ContentGeneratorPromptInput {

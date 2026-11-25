@@ -1,7 +1,25 @@
 import { z } from 'zod';
 import { RATIONALE_MAX_LENGTH } from '../content-generation.constants.js';
 import { ContentField } from '../enums/content-field.enum.js';
+import { ContentQualityTier } from '../enums/content-quality-tier.enum.js';
 import type { ChannelContentRules } from './channel-content-rules.js';
+
+export const SHORT_DESCRIPTION_MAX_LENGTH = 300;
+export const GENERATED_TAG_MAX_LENGTH = 40;
+export const GENERATED_TAGS_MAX_COUNT = 10;
+export const QUALITY_NOTE_MAX_LENGTH = 240;
+
+const qualityTierSchema = z
+  .nativeEnum(ContentQualityTier)
+  .describe(
+    'Verification tier: verified_with_sources, commercial_assisted, or generic_provisional',
+  );
+
+const qualityNoteSchema = z
+  .string()
+  .min(1)
+  .max(QUALITY_NOTE_MAX_LENGTH)
+  .describe('One short Spanish sentence explaining why this quality tier applies');
 
 /** The Content Generator's answer: a title and a description, each with why it is better. */
 export interface GeneratedContent {
@@ -9,6 +27,8 @@ export interface GeneratedContent {
   titleRationale: string;
   descriptionHtml: string;
   descriptionRationale: string;
+  qualityTier?: ContentQualityTier;
+  qualityNote?: string;
 }
 
 /**
@@ -23,22 +43,51 @@ export function generatedContentSchema(rules: ChannelContentRules): z.ZodType<Ge
     titleRationale: rationale.describe('Why this title works better on the channel'),
     descriptionHtml: descriptionField(rules),
     descriptionRationale: rationale.describe('Why this description works better'),
+    qualityTier: qualityTierSchema.optional(),
+    qualityNote: qualityNoteSchema.optional(),
   });
 }
 
 /** A rewrite of the fields asked for; the others are absent. */
-export type ContentDraftOutput = Partial<Pick<GeneratedContent, 'title' | 'descriptionHtml'>>;
+export interface ContentDraftOutput {
+  title?: string;
+  descriptionHtml?: string;
+  shortDescription?: string;
+  tags?: string[];
+  qualityTier?: ContentQualityTier;
+  qualityNote?: string;
+}
 
 /** The schema of a rewrite: only the fields asked for, each within the channel's limits. */
 export function contentDraftSchema(
   rules: ChannelContentRules,
   fields: ReadonlySet<ContentField>,
 ): z.ZodType<ContentDraftOutput> {
-  if (!fields.has(ContentField.Description)) return z.object({ title: titleField(rules) });
-  if (!fields.has(ContentField.Title)) {
-    return z.object({ descriptionHtml: descriptionField(rules) });
+  const shape: Record<string, z.ZodTypeAny> = {
+    qualityTier: qualityTierSchema.optional(),
+    qualityNote: qualityNoteSchema.optional(),
+  };
+  if (fields.has(ContentField.Title)) {
+    shape.title = titleField(rules);
   }
-  return z.object({ title: titleField(rules), descriptionHtml: descriptionField(rules) });
+  if (fields.has(ContentField.Description)) {
+    shape.descriptionHtml = descriptionField(rules);
+  }
+  if (fields.has(ContentField.ShortDescription)) {
+    shape.shortDescription = z
+      .string()
+      .min(1)
+      .max(SHORT_DESCRIPTION_MAX_LENGTH)
+      .describe('Plain-text commercial summary (1-2 sentences, no HTML)');
+  }
+  if (fields.has(ContentField.Tags)) {
+    shape.tags = z
+      .array(z.string().min(1).max(GENERATED_TAG_MAX_LENGTH))
+      .min(1)
+      .max(GENERATED_TAGS_MAX_COUNT)
+      .describe('Relevant Spanish commercial search tags');
+  }
+  return z.object(shape) as z.ZodType<ContentDraftOutput>;
 }
 
 function titleField(rules: ChannelContentRules): z.ZodString {

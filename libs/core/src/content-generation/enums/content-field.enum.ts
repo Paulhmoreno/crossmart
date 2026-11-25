@@ -2,4 +2,6 @@
 export enum ContentField {
   Title = 'title',
   Description = 'description',
+  ShortDescription = 'short_description',
+  Tags = 'tags',
 }

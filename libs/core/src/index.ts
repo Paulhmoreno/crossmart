@@ -258,6 +258,7 @@ export * from './content-generation/content-generation.module.js';
 export * from './content-generation/entities/content-draft.js';
 export * from './content-generation/entities/content-generation.js';
 export * from './content-generation/enums/content-field.enum.js';
+export * from './content-generation/enums/content-quality-tier.enum.js';
 export * from './content-generation/queue/content-generation.queue.js';
 export * from './content-generation/services/content-draft.service.js';
 export * from './content-generation/services/content-generation.runner.js';

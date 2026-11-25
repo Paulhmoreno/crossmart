@@ -25,6 +25,8 @@ export interface ContentRefinerPromptInput {
 const FIELD_NAMES: Record<ContentField, string> = {
   [ContentField.Title]: 'title',
   [ContentField.Description]: 'description',
+  [ContentField.ShortDescription]: 'short description',
+  [ContentField.Tags]: 'tags',
 };
 const AND = ' and ';
 

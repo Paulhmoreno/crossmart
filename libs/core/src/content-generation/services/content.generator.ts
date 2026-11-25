@@ -3,11 +3,15 @@ import { AI_MAX_OUTPUT_TOKENS } from '../../ai/ai.constants.js';
 import { AiFeature } from '../../ai/enums/ai-feature.enum.js';
 import { AiOutputRejectedError } from '../../ai/errors/ai.errors.js';
 import {
-  contentGeneratorSystemPrompt,
-  contentGeneratorUserPrompt,
-} from '../../ai/prompts/content-generator.v1.prompt.js';
+  contentGeneratorV2SystemPrompt,
+  contentGeneratorV2UserPrompt,
+} from '../../ai/prompts/content-generator.v2.prompt.js';
 import { AiGateway } from '../../ai/services/ai-gateway.service.js';
-import { EMPTY_AFTER_CLEANING } from '../content-generation.constants.js';
+import { EMPTY_AFTER_CLEANING, RATIONALE_MAX_LENGTH } from '../content-generation.constants.js';
+import {
+  CONTENT_QUALITY_TIER_LABELS,
+  type ContentQualityTier,
+} from '../enums/content-quality-tier.enum.js';
 import { cleanDescription, cleanTitle } from '../rules/content-cleaning.js';
 import {
   type GeneratedContent,
@@ -15,6 +19,14 @@ import {
 } from '../rules/generated-content.schema.js';
 import { promptProduct } from '../rules/prompt-product.js';
 import type { ContentTarget } from './content-target.loader.js';
+
+function withTierBadge(rationale: string, tier: ContentQualityTier | undefined): string {
+  const trimmed = rationale.trim();
+  if (!tier) return trimmed;
+  const badge = `[${CONTENT_QUALITY_TIER_LABELS[tier]}] `;
+  if (trimmed.startsWith(badge)) return trimmed.slice(0, RATIONALE_MAX_LENGTH);
+  return `${badge}${trimmed}`.slice(0, RATIONALE_MAX_LENGTH);
+}
 
 /**
  * The Content Generator agent: writes a channel-optimised title and description for one
@@ -29,8 +41,8 @@ export class ContentGenerator {
     const { output } = await this.ai.generate(
       { workspaceId: target.workspaceId, feature: AiFeature.ContentGeneration },
       {
-        system: contentGeneratorSystemPrompt(target.rules),
-        prompt: contentGeneratorUserPrompt({
+        system: contentGeneratorV2SystemPrompt(target.rules),
+        prompt: contentGeneratorV2UserPrompt({
           rules: target.rules,
           product: promptProduct(target.product),
           current: target.current,
@@ -53,7 +65,9 @@ export class ContentGenerator {
       title,
       descriptionHtml,
       titleRationale: output.titleRationale.trim(),
-      descriptionRationale: output.descriptionRationale.trim(),
+      descriptionRationale: withTierBadge(output.descriptionRationale, output.qualityTier),
+      ...(output.qualityTier ? { qualityTier: output.qualityTier } : {}),
+      ...(output.qualityNote?.trim() ? { qualityNote: output.qualityNote.trim() } : {}),
     };
   }
 }

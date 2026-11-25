@@ -97,10 +97,11 @@ export const LISTING_NOT_FOUND = 'Listing not found';
 export const LISTING_PRODUCT_NOT_FOUND = 'Product not found';
 
 /**
- * Item specifics a merchant may set on one listing, and their sizes. eBay takes aspect names of
- * up to 40 characters, values of up to 50 (Inventory API) and up to 30 values per aspect.
+ * Item specifics a merchant may set on one listing, and their sizes. Supports both marketplace
+ * aspects (eBay up to 40-char names / 30 values) and longer channel fields like WooCommerce
+ * short descriptions (up to 400 characters).
  */
 export const ITEM_SPECIFICS_MAX = 60;
 export const ITEM_SPECIFIC_NAME_MAX_LENGTH = 40;
 export const ITEM_SPECIFIC_VALUES_MAX = 30;
-export const ITEM_SPECIFIC_VALUE_MAX_LENGTH = 50;
+export const ITEM_SPECIFIC_VALUE_MAX_LENGTH = 400;

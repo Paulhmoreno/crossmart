@@ -1,5 +1,6 @@
 import type { ListingContent } from '../../listings/entities/listing-override.js';
 import type { ContentField } from '../enums/content-field.enum.js';
+import type { ContentQualityTier } from '../enums/content-quality-tier.enum.js';
 
 /** A request to rewrite fields a merchant is editing, for the catalog or for one store. */
 export interface ContentDraftRequest {
@@ -17,4 +18,12 @@ export interface ContentDraftRequest {
 export interface ContentDraft {
   title: string | null;
   descriptionHtml: string | null;
+  /** Plain-text commercial summary (e.g. WooCommerce short description), when requested. */
+  shortDescription?: string | null;
+  /** Suggested search tags, when requested. */
+  tags?: string[] | null;
+  /** Commercial verification tier assigned to the draft, when returned by the model. */
+  qualityTier?: ContentQualityTier | null;
+  /** Short note explaining the assigned quality tier, when returned by the model. */
+  qualityNote?: string | null;
 }

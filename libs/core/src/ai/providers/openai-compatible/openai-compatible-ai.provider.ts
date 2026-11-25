@@ -28,17 +28,25 @@ import { parseOpenAiSseStream } from './openai-compatible-sse.parser.js';
 import { normalizeOpenAiBaseUrl } from './openai-compatible-url.js';
 
 const REQUEST_TIMEOUT_MS = 90_000;
-const PROBE_TIMEOUT_MS = 25_000;
+const PROBE_TIMEOUT_MS = 45_000;
 const HTTP_UNAUTHORIZED = 401;
 const HTTP_FORBIDDEN = 403;
 const HTTP_BAD_REQUEST = 400;
 const HTTP_NOT_FOUND = 404;
 const HTTP_METHOD_NOT_ALLOWED = 405;
 const HTTP_UNPROCESSABLE = 422;
+const HTTP_TOO_MANY_REQUESTS = 429;
 const HTTP_NOT_IMPLEMENTED = 501;
 const HTTP_REDIRECT_MIN = 300;
 const HTTP_REDIRECT_MAX = 399;
 const MAX_ERROR_BODY_CHARS = 300;
+
+export class AiDiagnosticError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'AiDiagnosticError';
+  }
+}
 
 export interface OpenAiCompatibleOptions {
   baseUrl: string;
@@ -129,9 +137,112 @@ function isStreamOptionsUnsupported(failure: HttpFailure): boolean {
   );
 }
 
+const SSE_LINE_PREFIX = 'data:';
+const SSE_LINE_PREFIX_LEN = SSE_LINE_PREFIX.length;
+
+function parseCompletionPayloadText(
+  rawText: string,
+  fallbackModel: string,
+): OpenAiCompletionResponse {
+  const trimmed = rawText.trim();
+  if (!trimmed) {
+    return { model: fallbackModel, choices: [] };
+  }
+  // Some OpenAI-compatible gateways return SSE (`data: {...}`) or NDJSON even on stream:false.
+  if (trimmed.startsWith(SSE_LINE_PREFIX) || trimmed.includes(`\n${SSE_LINE_PREFIX}`)) {
+    let model = fallbackModel;
+    let text = '';
+    let finishReason: string | null = null;
+    let promptTokens = 0;
+    let completionTokens = 0;
+    for (const rawLine of trimmed.split(/\r?\n/)) {
+      const line = rawLine.trim();
+      if (!line.startsWith(SSE_LINE_PREFIX)) continue;
+      const body = line.slice(SSE_LINE_PREFIX_LEN).trim();
+      if (!body || body === '[DONE]') continue;
+      try {
+        const chunk = JSON.parse(body) as {
+          model?: string;
+          choices?: Array<{
+            delta?: { content?: string | null };
+            message?: { content?: string | null };
+            finish_reason?: string | null;
+          }>;
+          usage?: { prompt_tokens?: number; completion_tokens?: number } | null;
+        };
+        if (chunk.model) model = chunk.model;
+        const choice = chunk.choices?.[0];
+        const piece = choice?.delta?.content ?? choice?.message?.content;
+        if (typeof piece === 'string') text += piece;
+        if (choice?.finish_reason) finishReason = choice.finish_reason;
+        if (typeof chunk.usage?.prompt_tokens === 'number')
+          promptTokens = chunk.usage.prompt_tokens;
+        if (typeof chunk.usage?.completion_tokens === 'number') {
+          completionTokens = chunk.usage.completion_tokens;
+        }
+      } catch {
+        // Ignore keepalive or partial SSE lines.
+      }
+    }
+    return {
+      model,
+      choices: [{ message: { content: text }, finish_reason: finishReason }],
+      usage: { prompt_tokens: promptTokens, completion_tokens: completionTokens },
+    };
+  }
+  // Handle single JSON object or trailing newline / concatenated JSON objects gracefully.
+  try {
+    return JSON.parse(trimmed) as OpenAiCompletionResponse;
+  } catch {
+    const firstLine = trimmed.split(/\r?\n/).find((line) => line.trim().startsWith('{'));
+    if (firstLine) {
+      return JSON.parse(firstLine) as OpenAiCompletionResponse;
+    }
+    throw new Error('La respuesta del servidor no es JSON válido.');
+  }
+}
+
 function isToolsUnsupported(failure: HttpFailure): boolean {
   if (failure.status !== HTTP_BAD_REQUEST && failure.status !== HTTP_UNPROCESSABLE) return false;
   return /tool|function|does not support tools|not supported/i.test(failure.message);
+}
+
+function needsMaxCompletionTokens(failure: HttpFailure): boolean {
+  if (failure.status !== HTTP_BAD_REQUEST && failure.status !== HTTP_UNPROCESSABLE) return false;
+  return /max_completion_tokens/i.test(failure.message);
+}
+
+function swapMaxTokensField(payload: Record<string, unknown>): Record<string, unknown> {
+  if (!('max_tokens' in payload)) return payload;
+  const { max_tokens: maxTokens, ...rest } = payload;
+  return { ...rest, max_completion_tokens: maxTokens };
+}
+
+function describeNetworkError(error: unknown, baseUrl: string): string {
+  const host = URL.canParse(baseUrl) ? new URL(baseUrl).host : baseUrl;
+  if (error instanceof Error && error.name === 'TimeoutError') {
+    return `Tiempo de espera agotado al conectar con ${host}.`;
+  }
+  if (error instanceof Error) {
+    const cause = (error as Error & { cause?: { code?: string; message?: string } }).cause;
+    const code = cause?.code ?? cause?.message ?? error.message;
+    return `No se pudo conectar con ${host} (${String(code).slice(0, MAX_ERROR_BODY_CHARS)}). Verifica la URL base y la conectividad de red.`;
+  }
+  return `No se pudo conectar con ${host}.`;
+}
+
+function describeHttpFailure(failure: HttpFailure): string {
+  const detail = failure.message ? `: ${failure.message}` : '';
+  if (failure.status === HTTP_UNAUTHORIZED || failure.status === HTTP_FORBIDDEN) {
+    return `El proveedor rechazó la API Key (HTTP ${failure.status})${detail}`;
+  }
+  if (failure.status === HTTP_NOT_FOUND) {
+    return `Endpoint o modelo no encontrado (HTTP 404)${detail}. Verifica que la URL base incluya el prefijo correcto (ej. /v1) y el nombre exacto del modelo.`;
+  }
+  if (failure.status === HTTP_TOO_MANY_REQUESTS) {
+    return `Límite de peticiones o cuota excedida en el proveedor (HTTP 429)${detail}`;
+  }
+  return `El proveedor respondió HTTP ${failure.status}${detail}`;
 }
 
 function extractErrorMessage(bodyText: string): string {
@@ -291,7 +402,12 @@ export class OpenAiCompatibleAiProvider extends AiProvider {
   /** Lists available models from `GET <baseUrl>/models` when supported by the server. */
   async listModels(): Promise<{ supported: boolean; models: AiModelOption[] }> {
     try {
-      const response = await this.send('/models', { method: 'GET' }, undefined, PROBE_TIMEOUT_MS);
+      const response = await this.send(
+        '/models',
+        { method: 'GET', accept: 'application/json' },
+        undefined,
+        PROBE_TIMEOUT_MS,
+      );
       if (
         response.status === HTTP_NOT_FOUND ||
         response.status === HTTP_METHOD_NOT_ALLOWED ||
@@ -309,12 +425,7 @@ export class OpenAiCompatibleAiProvider extends AiProvider {
         .sort((left, right) => left.id.localeCompare(right.id));
       return { supported: true, models };
     } catch (error) {
-      if (this.isHttpFailure(error)) {
-        if (error.status === HTTP_UNAUTHORIZED || error.status === HTTP_FORBIDDEN) {
-          throw new AiKeyRejectedError();
-        }
-      }
-      throw this.toProviderError(error);
+      throw new AiDiagnosticError(this.describeDiagnosticError(error));
     }
   }
 
@@ -326,12 +437,12 @@ export class OpenAiCompatibleAiProvider extends AiProvider {
       {
         model: this.model,
         messages: [{ role: 'user', content: 'Respond with OK.' }],
-        max_tokens: 16,
+        max_tokens: 256,
       },
       undefined,
       PROBE_TIMEOUT_MS,
     ).catch((error) => {
-      throw this.toProviderError(error);
+      throw new AiDiagnosticError(this.describeDiagnosticError(error));
     });
     const resolvedModel = basicData.model?.trim() || this.model;
 
@@ -357,7 +468,7 @@ export class OpenAiCompatibleAiProvider extends AiProvider {
             { role: 'system', content: 'Return JSON with ok=true.' },
             { role: 'user', content: 'ping' },
           ],
-          max_tokens: 32,
+          max_tokens: 256,
           response_format: {
             type: 'json_schema',
             json_schema: {
@@ -381,7 +492,7 @@ export class OpenAiCompatibleAiProvider extends AiProvider {
           system: 'Return JSON with {"ok": true}.',
           prompt: 'ping',
           schema: probeSchema,
-          maxOutputTokens: 48,
+          maxOutputTokens: 256,
         });
         structuredOutput = probeSchema.safeParse(JSON.parse(completion.text)).success;
       } catch {
@@ -397,7 +508,7 @@ export class OpenAiCompatibleAiProvider extends AiProvider {
         {
           model: this.model,
           messages: [{ role: 'user', content: 'Say ok without calling any tool.' }],
-          max_tokens: 16,
+          max_tokens: 128,
           tools: [
             {
               type: 'function',
@@ -436,13 +547,23 @@ export class OpenAiCompatibleAiProvider extends AiProvider {
     listener: AiConversationListener,
     signal?: AbortSignal,
   ): Promise<AiConversationReply> {
-    const response = await this.send(
+    let response = await this.send(
       '/chat/completions',
       { method: 'POST', body: JSON.stringify(payload) },
       signal,
     );
     if (!response.ok) {
-      throw await this.readFailure(response);
+      const failure = await this.readFailure(response);
+      if (needsMaxCompletionTokens(failure) && 'max_tokens' in payload) {
+        response = await this.send(
+          '/chat/completions',
+          { method: 'POST', body: JSON.stringify(swapMaxTokensField(payload)) },
+          signal,
+        );
+        if (!response.ok) throw await this.readFailure(response);
+      } else {
+        throw failure;
+      }
     }
     const contentType = response.headers.get('content-type') ?? '';
     if (contentType.includes('text/event-stream') && response.body) {
@@ -458,28 +579,51 @@ export class OpenAiCompatibleAiProvider extends AiProvider {
     signal?: AbortSignal,
     timeoutMs = this.timeoutMs,
   ): Promise<ResponseType> {
+    const bodyPayload =
+      path === '/chat/completions' && payload.stream === undefined
+        ? { ...payload, stream: false }
+        : payload;
     const response = await this.send(
       path,
-      { method: 'POST', body: JSON.stringify(payload) },
+      { method: 'POST', body: JSON.stringify(bodyPayload), accept: 'application/json' },
       signal,
       timeoutMs,
     );
     if (!response.ok) {
-      throw await this.readFailure(response);
+      const failure = await this.readFailure(response);
+      if (needsMaxCompletionTokens(failure) && 'max_tokens' in bodyPayload) {
+        const retryResponse = await this.send(
+          path,
+          {
+            method: 'POST',
+            body: JSON.stringify(swapMaxTokensField(bodyPayload)),
+            accept: 'application/json',
+          },
+          signal,
+          timeoutMs,
+        );
+        if (!retryResponse.ok) {
+          throw await this.readFailure(retryResponse);
+        }
+        const retryText = await retryResponse.text();
+        return parseCompletionPayloadText(retryText, this.model) as ResponseType;
+      }
+      throw failure;
     }
-    return (await response.json()) as ResponseType;
+    const rawText = await response.text();
+    return parseCompletionPayloadText(rawText, this.model) as ResponseType;
   }
 
   private async send(
     path: string,
-    init: { method: string; body?: string },
+    init: { method: string; body?: string; accept?: string },
     signal?: AbortSignal,
     timeoutMs = this.timeoutMs,
   ): Promise<Response> {
     const timeoutSignal = AbortSignal.timeout(timeoutMs);
     const combinedSignal = signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal;
     const headers: Record<string, string> = {
-      Accept: 'application/json, text/event-stream',
+      Accept: init.accept ?? 'application/json, text/event-stream',
     };
     if (init.body !== undefined) headers['Content-Type'] = 'application/json';
     if (this.apiKey) headers.Authorization = `Bearer ${this.apiKey}`;
@@ -598,6 +742,17 @@ export class OpenAiCompatibleAiProvider extends AiProvider {
     return this.toProviderError(error);
   }
 
+  /** Returns a safe, human-readable diagnostic message for connection tests without leaking secrets. */
+  describeDiagnosticError(error: unknown): string {
+    if (this.isHttpFailure(error)) {
+      this.logger.warn(`OpenAI-compatible probe failed with HTTP ${error.status}`);
+      return describeHttpFailure(error);
+    }
+    const networkMsg = describeNetworkError(error, this.baseUrl);
+    this.logger.warn(`OpenAI-compatible probe network error: ${networkMsg}`);
+    return networkMsg;
+  }
+
   private toProviderError(error: unknown): unknown {
     if (isAbortError(error)) return error;
     if (this.isHttpFailure(error)) {
@@ -607,7 +762,8 @@ export class OpenAiCompatibleAiProvider extends AiProvider {
       }
       return new AiProviderUnavailableError(error.status);
     }
-    this.logger.warn('OpenAI-compatible request failed due to network or timeout error');
+    const reason = describeNetworkError(error, this.baseUrl);
+    this.logger.warn(`OpenAI-compatible request failed: ${reason}`);
     return new AiProviderUnavailableError(undefined);
   }
 }

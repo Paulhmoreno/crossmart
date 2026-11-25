@@ -5,6 +5,7 @@ import {
   EBAY_CONTENT_LIMITS,
   GOOGLE_MERCHANT_CONTENT_LIMITS,
   SHOPIFY_CONTENT_LIMITS,
+  WOOCOMMERCE_CONTENT_LIMITS,
 } from '@crossmart/connectors';
 import { ActivityActorType } from '@crossmart/database';
 import { productDetail } from '../../listings/testing/listing.fixtures.js';
@@ -28,6 +29,7 @@ export const CONTENT_JOB: ContentGenerationJob = {
 /** The connectors' own limits, on stand-ins that declare nothing else. */
 const CONNECTORS_WITH_LIMITS = [
   { channel: ChannelType.Shopify, contentLimits: SHOPIFY_CONTENT_LIMITS },
+  { channel: ChannelType.WooCommerce, contentLimits: WOOCOMMERCE_CONTENT_LIMITS },
   { channel: ChannelType.Ebay, contentLimits: EBAY_CONTENT_LIMITS },
   { channel: ChannelType.GoogleMerchant, contentLimits: GOOGLE_MERCHANT_CONTENT_LIMITS },
 ] as ChannelConnector[];
