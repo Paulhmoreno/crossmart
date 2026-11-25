@@ -472,4 +472,23 @@ describe('WooCommerceConnector', () => {
     expect(tampered).toBeNull();
     http.assertDone();
   });
+
+  it('decodes HTML entities in WooCommerce category and attribute names', async () => {
+    const { http, connector } = createHarness();
+    http.expect(
+      HttpMethod.Get,
+      /\/wp-json\/wc\/v3\/products\/categories/,
+      jsonResponse([
+        { id: 80, name: 'Health &amp; Fitness', slug: 'health-fitness', parent: 0, count: 9 },
+        { id: 81, name: 'Men&#039;s Gear', slug: 'mens-gear', parent: 80, count: 2 },
+      ]),
+    );
+
+    const categories = await connector.suggestCategories(makeSession(false), 'Health & Fitness');
+    expect(categories).toEqual([
+      { id: '80', name: 'Health & Fitness' },
+      { id: '81', name: "Health & Fitness > Men's Gear" },
+    ]);
+    http.assertDone();
+  });
 });

@@ -24,8 +24,21 @@ const SCORE_NAME_MATCH = 75;
 const SCORE_PATH_MATCH = 50;
 const SCORE_TOKEN_MAX = 40;
 
-function normalizeText(value: string): string {
+function decodeHtmlEntities(value: string): string {
   return value
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#0*39;|&apos;/g, "'")
+    .replace(/&#(\d+);/g, (_match, dec: string) => {
+      const code = Number.parseInt(dec, 10);
+      return Number.isFinite(code) ? String.fromCodePoint(code) : '';
+    });
+}
+
+function normalizeText(value: string): string {
+  return decodeHtmlEntities(value)
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
     .toLowerCase()
@@ -38,7 +51,7 @@ function buildCategoryPath(category: WooCategory, byId: Map<number, WooCategory>
   let current: WooCategory | undefined = category;
   while (current && !visited.has(current.id)) {
     visited.add(current.id);
-    parts.unshift(current.name.trim());
+    parts.unshift(decodeHtmlEntities(current.name).trim());
     current = current.parent > 0 ? byId.get(current.parent) : undefined;
   }
   return parts.join(' > ');
@@ -111,12 +124,14 @@ export class WooCommerceTaxonomyProvider implements TaxonomyProvider {
     for (const attr of attributes) {
       const terms = await this.listAttributeTerms(account, attr.id);
       aspects.push({
-        name: attr.name.trim(),
+        name: decodeHtmlEntities(attr.name).trim(),
         required: false,
         usage: CategoryAspectUsage.Optional,
         mode: CategoryAspectMode.FreeText,
         multiple: true,
-        values: terms.slice(0, MAX_TERMS_PER_ATTRIBUTE).map((term) => term.name.trim()),
+        values: terms
+          .slice(0, MAX_TERMS_PER_ATTRIBUTE)
+          .map((term) => decodeHtmlEntities(term.name).trim()),
       });
     }
 
