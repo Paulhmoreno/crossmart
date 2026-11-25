@@ -1,5 +1,10 @@
 import { ChannelType, PublishRequirement } from '@crossmart/connectors';
-import { ListingSource, ListingStatus, ProductStatus } from '@crossmart/database';
+import {
+  CatalogSourceKind,
+  ListingSource,
+  ListingStatus,
+  ProductStatus,
+} from '@crossmart/database';
 import type { ProductSummary } from '../../catalog/entities/product-views.js';
 import type { ChannelConnectionsService } from '../../channels/services/channel-connections.service.js';
 import { ListingDisplayState } from '../enums/listing-display-state.enum.js';
@@ -19,6 +24,8 @@ function summary(id: string, connectionIds: string[]): ProductSummary {
     id,
     handle: id,
     title: id,
+    sourceKind: CatalogSourceKind.MANUAL,
+    sourceExternalId: null,
     status: ProductStatus.ACTIVE,
     condition: null,
     vendor: null,

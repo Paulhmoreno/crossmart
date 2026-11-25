@@ -13,6 +13,7 @@ const ACTOR = Actor.user('user-1');
 
 function setup() {
   const writer = {
+    countSourceManaged: vi.fn<ProductBulkWriter['countSourceManaged']>().mockResolvedValue(0),
     setStatus: vi.fn<ProductBulkWriter['setStatus']>().mockResolvedValue(2),
     addTags: vi.fn<ProductBulkWriter['addTags']>().mockResolvedValue(2),
     removeTags: vi.fn<ProductBulkWriter['removeTags']>().mockResolvedValue(2),

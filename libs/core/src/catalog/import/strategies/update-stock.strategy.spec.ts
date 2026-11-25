@@ -1,7 +1,7 @@
 import type { StockFileParser, StockParseResult } from '../../entities/catalog-import.js';
 import { CatalogImportFormat } from '../../enums/catalog-import-format.enum.js';
 import { ImportIssueCode } from '../../enums/import-issue-code.enum.js';
-import { InventoryMovementReason } from '@crossmart/database';
+import { CatalogSourceKind, InventoryMovementReason } from '@crossmart/database';
 import type { StockLevelsService } from '../../../inventory/services/stock-levels.service.js';
 import { UpdateStockStrategy } from './update-stock.strategy.js';
 import { IMPORT_ACTOR, importRequest } from './__testing__/import-request.factory.js';
@@ -11,8 +11,20 @@ const WORKSPACE_ID = 'ws-1';
 function setup(parsed: StockParseResult) {
   const inventory = {
     findBySkus: vi.fn<StockLevelsService['findBySkus']>().mockResolvedValue([
-      { inventoryItemId: 'item-mug', productId: 'product-mug', sku: 'MUG-1', tracked: true },
-      { inventoryItemId: 'item-gift', productId: 'product-gift', sku: 'GIFT-1', tracked: false },
+      {
+        inventoryItemId: 'item-mug',
+        productId: 'product-mug',
+        sku: 'MUG-1',
+        tracked: true,
+        sourceKind: CatalogSourceKind.MANUAL,
+      },
+      {
+        inventoryItemId: 'item-gift',
+        productId: 'product-gift',
+        sku: 'GIFT-1',
+        tracked: false,
+        sourceKind: CatalogSourceKind.MANUAL,
+      },
     ]),
     setAvailable: vi.fn<StockLevelsService['setAvailable']>().mockResolvedValue(),
   };

@@ -27,6 +27,7 @@ export const PRODUCT_SUMMARY_INCLUDE = {
 export const PRODUCT_DETAIL_INCLUDE = {
   variants: { include: { inventoryItem: true }, orderBy: BY_POSITION },
   media: { orderBy: BY_POSITION },
+  documents: { orderBy: { createdAt: 'asc' } },
 } satisfies Prisma.ProductInclude;
 
 export type ProductSummaryRecord = Prisma.ProductGetPayload<{
@@ -39,6 +40,7 @@ export type ProductDetailRecord = Prisma.ProductGetPayload<{
 /** The catalog product an update import merges its file's changes into: everything it can keep. */
 export const PRODUCT_UPDATE_TARGET_SELECT = {
   id: true,
+  sourceKind: true,
   handle: true,
   title: true,
   descriptionHtml: true,

@@ -330,6 +330,27 @@ const ACTION_WORDING: Record<ActivityAction, ActionWording> = {
     operation: 'Approving suggestions',
     describe: (entry) => `Approved ${countOf(SUGGESTION_NOUN, entry)}`,
   },
+  [ActivityAction.OdooConnected]: {
+    operation: 'Connecting Odoo',
+    describe: (entry) => `Connected Odoo source${named(entry)}`,
+  },
+  [ActivityAction.OdooCredentialsUpdated]: {
+    operation: 'Updating Odoo connection',
+    describe: (entry) => `Updated Odoo source${named(entry)}`,
+  },
+  [ActivityAction.OdooDisconnected]: {
+    operation: 'Disconnecting Odoo',
+    describe: (entry) => `Disconnected Odoo source${named(entry)}`,
+  },
+  [ActivityAction.OdooSyncRequested]: {
+    operation: 'Starting Odoo sync',
+    describe: (entry) => withDetail(`Started Odoo sync${named(entry)}`, entry),
+  },
+  [ActivityAction.OdooSyncCompleted]: {
+    operation: 'Syncing from Odoo',
+    describe: (entry) =>
+      withDetail(`Synced ${countOfProducts(entry)} from Odoo${named(entry)}`, entry),
+  },
 };
 
 /** The one-line, human-readable text of an event, as stored and shown in the log. */

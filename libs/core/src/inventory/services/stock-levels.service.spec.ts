@@ -1,4 +1,4 @@
-import { InventoryMovementReason } from '@crossmart/database';
+import { CatalogSourceKind, InventoryMovementReason } from '@crossmart/database';
 import { Actor } from '../../activity/entities/actor.js';
 import type { InventoryItemRepository } from '../repositories/inventory-item.repository.js';
 import type { StockLevelsWriter } from '../repositories/stock-levels.writer.js';
@@ -6,7 +6,13 @@ import { CatalogEventBus } from '../../events/services/catalog-event-bus.js';
 import { WORKSPACE_ID } from './inventory.fixtures.js';
 import { StockLevelsService } from './stock-levels.service.js';
 
-const ITEM = { inventoryItemId: 'item-1', productId: 'product-1', sku: 'MUG-1', tracked: true };
+const ITEM = {
+  inventoryItemId: 'item-1',
+  productId: 'product-1',
+  sku: 'MUG-1',
+  tracked: true,
+  sourceKind: CatalogSourceKind.MANUAL,
+};
 
 function setup() {
   const items = { findBySkus: vi.fn<InventoryItemRepository['findBySkus']>() };

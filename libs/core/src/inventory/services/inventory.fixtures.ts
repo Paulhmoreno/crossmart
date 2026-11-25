@@ -1,4 +1,4 @@
-import { InventoryMovementReason } from '@crossmart/database';
+import { CatalogSourceKind, InventoryMovementReason } from '@crossmart/database';
 import type {
   InventoryMovementRecord,
   InventoryRowRecord,
@@ -22,7 +22,11 @@ export function inventoryRecord(overrides: Partial<InventoryRowRecord> = {}): In
       productId: 'product-1',
       sku: 'MUG-BLUE',
       optionValues: ['Blue'],
-      product: { title: 'Stoneware Mug', media: [{ url: 'https://cdn.test/mug.png' }] },
+      product: {
+        title: 'Stoneware Mug',
+        sourceKind: CatalogSourceKind.MANUAL,
+        media: [{ url: 'https://cdn.test/mug.png' }],
+      },
     },
     ...overrides,
   };

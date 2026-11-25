@@ -133,4 +133,14 @@ export enum ActivityAction {
   AgentProposalRejected = 'agent_proposal_rejected',
   /** Several suggestions were approved at once; each applied change is logged on its own too. */
   SuggestionsBulkApproved = 'suggestions_bulk_approved',
+  /** An Odoo ERP source connection was created or reconnected. */
+  OdooConnected = 'odoo_connected',
+  /** An Odoo ERP source connection's credentials or settings were updated. */
+  OdooCredentialsUpdated = 'odoo_credentials_updated',
+  /** An Odoo ERP source connection was disconnected (imported products kept). */
+  OdooDisconnected = 'odoo_disconnected',
+  /** An Odoo catalog sync job was queued. */
+  OdooSyncRequested = 'odoo_sync_requested',
+  /** An Odoo catalog sync job finished. */
+  OdooSyncCompleted = 'odoo_sync_completed',
 }

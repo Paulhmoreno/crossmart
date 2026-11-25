@@ -1,3 +1,4 @@
+import { CatalogSourceKind } from '@crossmart/database';
 import type { ProductSummary } from '../../catalog/entities/product-views.js';
 import type { ProductSummaryRecord } from '../../catalog/repositories/product.queries.js';
 import { SELECTION_BATCH_SIZE } from '../listings.constants.js';
@@ -11,6 +12,10 @@ function summary(id: string): ProductSummaryRecord {
   return {
     id,
     workspaceId: WS,
+    sourceKind: CatalogSourceKind.MANUAL,
+    sourceConnectionId: null,
+    sourceExternalId: null,
+    sourceMetadata: null,
     handle: id,
     title: id,
     descriptionHtml: '',

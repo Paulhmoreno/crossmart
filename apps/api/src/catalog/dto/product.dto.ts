@@ -1,15 +1,26 @@
 import { ApiProperty } from '@nestjs/swagger';
-import type { MediaView, ProductDetail, VariantView } from '@crossmart/core';
-import { OutOfStockPolicy, ProductCondition, ProductStatus } from '@crossmart/database';
+import type { MediaView, ProductDetail, ProductDocumentView, VariantView } from '@crossmart/core';
 import {
+  CatalogSourceKind,
+  OutOfStockPolicy,
+  ProductCondition,
+  ProductDocumentKind,
+  ProductStatus,
+} from '@crossmart/database';
+import {
+  CATALOG_SOURCE_KIND_SCHEMA_NAME,
   OUT_OF_STOCK_POLICY_SCHEMA_NAME,
   PRODUCT_CONDITION_SCHEMA_NAME,
+  PRODUCT_DOCUMENT_KIND_SCHEMA_NAME,
   PRODUCT_STATUS_SCHEMA_NAME,
 } from '../catalog.constants.js';
 
 export class VariantDto implements VariantView {
   @ApiProperty({ format: 'uuid' })
   id: string;
+
+  @ApiProperty({ type: String, nullable: true })
+  sourceExternalId: string | null;
 
   @ApiProperty()
   position: number;
@@ -68,6 +79,37 @@ export class MediaDto implements MediaView {
 
   @ApiProperty()
   position: number;
+
+  @ApiProperty({
+    description: 'True when synced from an authoritative source such as Odoo and protected',
+  })
+  sourceManaged: boolean;
+}
+
+export class ProductDocumentDto implements ProductDocumentView {
+  @ApiProperty({ format: 'uuid' })
+  id: string;
+
+  @ApiProperty()
+  sourceExternalId: string;
+
+  @ApiProperty()
+  name: string;
+
+  @ApiProperty()
+  mimetype: string;
+
+  @ApiProperty({ type: Number, nullable: true })
+  byteSize: number | null;
+
+  @ApiProperty({ enum: ProductDocumentKind, enumName: PRODUCT_DOCUMENT_KIND_SCHEMA_NAME })
+  kind: ProductDocumentKind;
+
+  @ApiProperty()
+  isPublic: boolean;
+
+  @ApiProperty()
+  createdAt: Date;
 }
 
 export class ProductDto implements ProductDetail {
@@ -79,6 +121,18 @@ export class ProductDto implements ProductDetail {
 
   @ApiProperty()
   title: string;
+
+  @ApiProperty({ enum: CatalogSourceKind, enumName: CATALOG_SOURCE_KIND_SCHEMA_NAME })
+  sourceKind: CatalogSourceKind;
+
+  @ApiProperty({ type: String, format: 'uuid', nullable: true })
+  sourceConnectionId: string | null;
+
+  @ApiProperty({ type: String, nullable: true })
+  sourceExternalId: string | null;
+
+  @ApiProperty({ type: Object, nullable: true })
+  sourceMetadata: Record<string, unknown> | null;
 
   @ApiProperty()
   descriptionHtml: string;
@@ -112,6 +166,9 @@ export class ProductDto implements ProductDetail {
   @ApiProperty({ type: [MediaDto] })
   media: MediaDto[];
 
+  @ApiProperty({ type: [ProductDocumentDto] })
+  documents: ProductDocumentDto[];
+
   @ApiProperty()
   createdAt: Date;
 
@@ -123,6 +180,7 @@ export class ProductDto implements ProductDetail {
       ...detail,
       variants: detail.variants.map((variant) => Object.assign(new VariantDto(), variant)),
       media: detail.media.map((media) => Object.assign(new MediaDto(), media)),
+      documents: detail.documents.map((doc) => Object.assign(new ProductDocumentDto(), doc)),
     });
   }
 }

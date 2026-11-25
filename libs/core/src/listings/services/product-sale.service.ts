@@ -1,9 +1,11 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
+import { CatalogSourceKind } from '@crossmart/database';
 import type { Actor } from '../../activity/entities/actor.js';
 import { ActivityAction } from '../../activity/enums/activity-action.enum.js';
 import { ActivitySubjectType } from '../../activity/enums/activity-subject-type.enum.js';
 import { ActivityRecorder } from '../../activity/services/activity-recorder.js';
 import type { ProductDetail } from '../../catalog/entities/product-views.js';
+import { ODOO_MANAGED_STOCK_MESSAGE } from '../../catalog/rules/source-ownership.rules.js';
 import { ProductsService } from '../../catalog/services/products.service.js';
 import type { ProductSale } from '../entities/product-sale.js';
 import { SoldProductStores } from './sold-product.stores.js';
@@ -27,6 +29,9 @@ export class ProductSaleService {
 
   async markSold(workspaceId: string, productId: string, actor: Actor): Promise<ProductSale> {
     const before = await this.products.get(workspaceId, productId);
+    if (before.sourceKind === CatalogSourceKind.ODOO) {
+      throw new BadRequestException(ODOO_MANAGED_STOCK_MESSAGE);
+    }
     const unitsCleared = await this.stock.clear(workspaceId, productId, actor);
     const removed = await this.stores.takeOff(workspaceId, productId, actor);
     const alreadySold = unitsCleared === 0 && removed.length === 0;

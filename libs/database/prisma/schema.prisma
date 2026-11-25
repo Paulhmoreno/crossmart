@@ -41,6 +41,8 @@ model User {
   agentProposals           AgentProposal[]           @relation("AgentProposalUser")
   agentProposalsDecided    AgentProposal[]           @relation("AgentProposalDecider")
   activityApproved         ActivityEvent[]           @relation("ActivityApprovedBy")
+  odooConnections          OdooConnection[]
+  odooSyncRuns             OdooSyncRun[]
   createdAt                DateTime                  @default(now()) @map("created_at")
   updatedAt                DateTime                  @updatedAt @map("updated_at")
 
@@ -345,6 +347,8 @@ model Workspace {
   askConversations         AskConversation[]
   agentWorkerConversations AgentWorkerConversation[]
   agentProposals           AgentProposal[]
+  odooConnection           OdooConnection?
+  odooSyncRuns             OdooSyncRun[]
   createdAt                DateTime                  @default(now()) @map("created_at")
   updatedAt                DateTime                  @updatedAt @map("updated_at")
 
@@ -651,30 +655,56 @@ model ProductView {
   @@map("product_views")
 }
 
+enum CatalogSourceKind {
+  MANUAL
+  ODOO
+
+  @@map("catalog_source_kind")
+}
+
+enum ProductDocumentKind {
+  DATASHEET
+  MANUAL
+  INTERNAL
+  OTHER
+
+  @@map("product_document_kind")
+}
+
 /// A product with its base content. Per-channel overrides live on its listings.
 model Product {
-  id              String            @id @default(uuid()) @db.Uuid
-  workspaceId     String            @map("workspace_id") @db.Uuid
-  workspace       Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  handle          String
-  title           String
-  descriptionHtml String            @default("") @map("description_html")
-  vendor          String?
-  productType     String?           @map("product_type")
-  tags            String[]
-  status          ProductStatus     @default(DRAFT)
+  id                 String            @id @default(uuid()) @db.Uuid
+  workspaceId        String            @map("workspace_id") @db.Uuid
+  workspace          Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  sourceKind         CatalogSourceKind @default(MANUAL) @map("source_kind")
+  sourceConnectionId String?           @map("source_connection_id") @db.Uuid
+  sourceConnection   OdooConnection?   @relation(fields: [sourceConnectionId], references: [id], onDelete: SetNull)
+  /// Stable product identifier in the source ERP (e.g. Odoo product.template id).
+  sourceExternalId   String?           @map("source_external_id")
+  /// Read-only ERP metadata (original name, category, brand, currency, taxes, dimensions, sync timestamp).
+  sourceMetadata     Json?             @map("source_metadata")
+  handle             String
+  title              String
+  descriptionHtml    String            @default("") @map("description_html")
+  vendor             String?
+  productType        String?           @map("product_type")
+  tags               String[]
+  status             ProductStatus     @default(DRAFT)
   /// The item's condition; null uses each store's default condition.
-  condition       ProductCondition?
+  condition          ProductCondition?
   /// Names of up to three options (Size, Color). Each variant holds one value per name, in order.
-  optionNames     String[]          @map("option_names")
-  variants        Variant[]
-  media           ProductMedia[]
-  listings        Listing[]
-  suggestions     Suggestion[]
-  createdAt       DateTime          @default(now()) @map("created_at")
-  updatedAt       DateTime          @updatedAt @map("updated_at")
+  optionNames        String[]          @map("option_names")
+  variants           Variant[]
+  media              ProductMedia[]
+  documents          ProductDocument[]
+  listings           Listing[]
+  suggestions        Suggestion[]
+  createdAt          DateTime          @default(now()) @map("created_at")
+  updatedAt          DateTime          @updatedAt @map("updated_at")
 
   @@unique([workspaceId, handle])
+  @@unique([sourceConnectionId, sourceExternalId])
+  @@index([workspaceId, sourceKind])
   @@index([workspaceId, title, id])
   @@map("products")
 }
@@ -684,6 +714,8 @@ model Variant {
   workspaceId      String                   @map("workspace_id") @db.Uuid
   productId        String                   @map("product_id") @db.Uuid
   product          Product                  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  /// Stable variant identifier in the source ERP (e.g. Odoo product.product id).
+  sourceExternalId String?                  @map("source_external_id")
   position         Int
   sku              String?
   barcode          String?
@@ -704,24 +736,52 @@ model Variant {
   updatedAt        DateTime                 @updatedAt @map("updated_at")
 
   @@unique([workspaceId, sku])
+  @@unique([productId, sourceExternalId])
   @@index([productId, position])
   @@map("variants")
 }
 
 model ProductMedia {
-  id          String   @id @default(uuid()) @db.Uuid
-  workspaceId String   @map("workspace_id") @db.Uuid
-  productId   String   @map("product_id") @db.Uuid
-  product     Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
-  url         String
-  altText     String?  @map("alt_text")
-  position    Int
-  createdAt   DateTime @default(now()) @map("created_at")
+  id            String   @id @default(uuid()) @db.Uuid
+  workspaceId   String   @map("workspace_id") @db.Uuid
+  productId     String   @map("product_id") @db.Uuid
+  product       Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  url           String
+  altText       String?  @map("alt_text")
+  position      Int
+  /// True when synced from an authoritative source (Odoo); protected from manual deletion.
+  sourceManaged Boolean  @default(false) @map("source_managed")
+  /// Stable source digest key to prevent duplicate image uploads on repeat sync.
+  sourceKey     String?  @map("source_key")
+  createdAt     DateTime @default(now()) @map("created_at")
 
   @@index([productId, position])
   /// Finds the media that use an uploaded file (`Upload.url`), for the orphan cleanup.
   @@index([workspaceId, url])
   @@map("product_media")
+}
+
+/// Technical sheets, manuals and internal documents associated with a product from an ERP source.
+/// Kept private to workspace members; never automatically published as storefront product media.
+model ProductDocument {
+  id               String              @id @default(uuid()) @db.Uuid
+  workspaceId      String              @map("workspace_id") @db.Uuid
+  productId        String              @map("product_id") @db.Uuid
+  product          Product             @relation(fields: [productId], references: [id], onDelete: Cascade)
+  sourceExternalId String              @map("source_external_id")
+  name             String
+  mimetype         String
+  byteSize         Int?                @map("byte_size")
+  kind             ProductDocumentKind @default(INTERNAL)
+  isPublic         Boolean             @default(false) @map("is_public")
+  storageKey       String?             @map("storage_key")
+  checksum         String?
+  createdAt        DateTime            @default(now()) @map("created_at")
+  updatedAt        DateTime            @updatedAt @map("updated_at")
+
+  @@unique([productId, sourceExternalId])
+  @@index([workspaceId, productId])
+  @@map("product_documents")
 }
 
 /// A file uploaded to Crossmart's storage. The workspace's storage use is the sum of `byteSize`.
@@ -1760,4 +1820,92 @@ model AgentProposal {
   @@index([workspaceId, updatedAt])
   @@index([status, expiresAt])
   @@map("agent_proposals")
+}
+
+// ─── Odoo Source Integration ──────────────────────────────────────────────────
+
+enum OdooConnectionStatus {
+  CONNECTED
+  ERROR
+  DISCONNECTED
+
+  @@map("odoo_connection_status")
+}
+
+enum OdooSyncRunStatus {
+  QUEUED
+  RUNNING
+  COMPLETED
+  FAILED
+
+  @@map("odoo_sync_run_status")
+}
+
+enum OdooSyncMode {
+  SELECTED
+  FULL
+
+  @@map("odoo_sync_mode")
+}
+
+/// A workspace's read-only connection to an authoritative Odoo 18 ERP instance.
+model OdooConnection {
+  id                String               @id @default(uuid()) @db.Uuid
+  workspaceId       String               @unique @map("workspace_id") @db.Uuid
+  workspace         Workspace            @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  displayName       String               @map("display_name")
+  url               String
+  database          String
+  username          String
+  /// Sealed JSON credentials `{ apiKey }`, encrypted with the workspace data key. Null when disconnected.
+  sealedCredentials String?              @map("sealed_credentials")
+  status            OdooConnectionStatus @default(CONNECTED)
+  /// Short user-facing reason for ERROR status. Never holds secrets.
+  statusReason      String?              @map("status_reason")
+  /// Optional advanced configuration and discovered instance metadata (warehouses, pricelists, currency).
+  settings          Json                 @default("{}")
+  connectedById     String?              @map("connected_by_id") @db.Uuid
+  connectedBy       User?                @relation(fields: [connectedById], references: [id], onDelete: SetNull)
+  connectedAt       DateTime             @default(now()) @map("connected_at")
+  disconnectedAt    DateTime?            @map("disconnected_at")
+  lastTestedAt      DateTime?            @map("last_tested_at")
+  lastSyncedAt      DateTime?            @map("last_synced_at")
+  products          Product[]
+  syncRuns          OdooSyncRun[]
+  createdAt         DateTime             @default(now()) @map("created_at")
+  updatedAt         DateTime             @updatedAt @map("updated_at")
+
+  @@map("odoo_connections")
+}
+
+/// One catalog sync run from Odoo into Crossmart, with progress and per-item issues.
+model OdooSyncRun {
+  id             String            @id @default(uuid(7)) @db.Uuid
+  workspaceId    String            @map("workspace_id") @db.Uuid
+  workspace      Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  connectionId   String            @map("connection_id") @db.Uuid
+  connection     OdooConnection    @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+  mode           OdooSyncMode      @default(SELECTED)
+  status         OdooSyncRunStatus @default(QUEUED)
+  /// Selection criteria (templateIds, skus, barcodes, categoryIds, saleOnly).
+  filter         Json              @default("{}")
+  totalCount     Int               @default(0) @map("total_count")
+  processedCount Int               @default(0) @map("processed_count")
+  createdCount   Int               @default(0) @map("created_count")
+  updatedCount   Int               @default(0) @map("updated_count")
+  skippedCount   Int               @default(0) @map("skipped_count")
+  failedCount    Int               @default(0) @map("failed_count")
+  errorMessage   String?           @map("error_message")
+  /// Array of per-product error entries `{ externalId, name, message }`.
+  issues         Json              @default("[]")
+  actorUserId    String?           @map("actor_user_id") @db.Uuid
+  actorUser      User?             @relation(fields: [actorUserId], references: [id], onDelete: SetNull)
+  startedAt      DateTime?         @map("started_at")
+  finishedAt     DateTime?         @map("finished_at")
+  createdAt      DateTime          @default(now()) @map("created_at")
+  updatedAt      DateTime          @updatedAt @map("updated_at")
+
+  @@index([workspaceId, createdAt(sort: Desc)])
+  @@index([connectionId, createdAt(sort: Desc)])
+  @@map("odoo_sync_runs")
 }

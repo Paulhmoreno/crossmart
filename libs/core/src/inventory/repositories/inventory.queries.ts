@@ -14,6 +14,7 @@ export const INVENTORY_ROW_INCLUDE = {
       product: {
         select: {
           title: true,
+          sourceKind: true,
           media: { select: { url: true }, orderBy: { position: ASCENDING }, take: 1 },
         },
       },

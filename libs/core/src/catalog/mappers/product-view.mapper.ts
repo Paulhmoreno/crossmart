@@ -51,6 +51,8 @@ export function toProductSummary(record: ProductSummaryRecord): ProductSummary {
     id: record.id,
     handle: record.handle,
     title: record.title,
+    sourceKind: record.sourceKind,
+    sourceExternalId: record.sourceExternalId,
     status: record.status,
     condition: record.condition,
     vendor: record.vendor,
@@ -64,11 +66,20 @@ export function toProductSummary(record: ProductSummaryRecord): ProductSummary {
   };
 }
 
+function toSourceMetadata(value: Prisma.JsonValue | null): Record<string, unknown> | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  return value as Record<string, unknown>;
+}
+
 export function toProductDetail(record: ProductDetailRecord): ProductDetail {
   return {
     id: record.id,
     handle: record.handle,
     title: record.title,
+    sourceKind: record.sourceKind,
+    sourceConnectionId: record.sourceConnectionId,
+    sourceExternalId: record.sourceExternalId,
+    sourceMetadata: toSourceMetadata(record.sourceMetadata),
     descriptionHtml: record.descriptionHtml,
     vendor: record.vendor,
     productType: record.productType,
@@ -78,6 +89,7 @@ export function toProductDetail(record: ProductDetailRecord): ProductDetail {
     optionNames: record.optionNames,
     variants: record.variants.map((variant) => ({
       id: variant.id,
+      sourceExternalId: variant.sourceExternalId,
       position: variant.position,
       sku: variant.sku,
       barcode: variant.barcode,
@@ -92,7 +104,25 @@ export function toProductDetail(record: ProductDetailRecord): ProductDetail {
       tracked: variant.inventoryItem?.tracked ?? false,
       available: variant.inventoryItem?.available ?? 0,
     })),
-    media: record.media.map(({ id, url, altText, position }) => ({ id, url, altText, position })),
+    media: record.media.map(({ id, url, altText, position, sourceManaged }) => ({
+      id,
+      url,
+      altText,
+      position,
+      sourceManaged,
+    })),
+    documents: record.documents.map(
+      ({ id, sourceExternalId, name, mimetype, byteSize, kind, isPublic, createdAt }) => ({
+        id,
+        sourceExternalId,
+        name,
+        mimetype,
+        byteSize,
+        kind,
+        isPublic,
+        createdAt,
+      }),
+    ),
     createdAt: record.createdAt,
     updatedAt: record.updatedAt,
   };

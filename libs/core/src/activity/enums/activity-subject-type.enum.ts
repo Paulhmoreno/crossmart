@@ -16,6 +16,8 @@ export enum ActivitySubjectType {
   /** A role the workspace defined itself. */
   CustomRole = 'custom_role',
   ChannelConnection = 'channel_connection',
+  /** A read-only Odoo ERP source connection. */
+  OdooConnection = 'odoo_connection',
   /** A URL the workspace receives webhook events at. */
   WebhookEndpoint = 'webhook_endpoint',
 }

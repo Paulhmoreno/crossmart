@@ -167,9 +167,27 @@ export class ProductUpdateWriter {
     productId: string,
     draft: ProductDraft,
   ): Promise<void> {
+    const existing = await tx.productMedia.findMany({
+      where: { productId, workspaceId },
+      select: { url: true, sourceManaged: true, sourceKey: true },
+    });
+    const sourceByUrl = new Map(
+      existing.map((item) => [
+        item.url,
+        { sourceManaged: item.sourceManaged, sourceKey: item.sourceKey },
+      ]),
+    );
     await tx.productMedia.deleteMany({ where: { productId, workspaceId } });
     await tx.productMedia.createMany({
-      data: toMediaInputs(workspaceId, draft.media).map((media) => ({ ...media, productId })),
+      data: toMediaInputs(workspaceId, draft.media).map((media) => {
+        const preserved = sourceByUrl.get(media.url);
+        return {
+          ...media,
+          productId,
+          sourceManaged: preserved?.sourceManaged ?? false,
+          sourceKey: preserved?.sourceKey ?? null,
+        };
+      }),
     });
   }
 }

@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { normalizeAmount, sanitizeDescriptionHtml, toCountedPage } from '@crossmart/common';
+import { CatalogSourceKind } from '@crossmart/database';
 import type { Actor } from '../../activity/entities/actor.js';
 import { ActivityAction } from '../../activity/enums/activity-action.enum.js';
 import { CatalogChangeKind } from '../../events/enums/catalog-change-kind.enum.js';
@@ -16,6 +17,11 @@ import { toProductDetail, toProductSummary } from '../mappers/product-view.mappe
 import { ProductUpdateWriter } from '../repositories/product-update.writer.js';
 import { ProductRepository } from '../repositories/product.repository.js';
 import { normalizeDraft } from '../rules/normalize-draft.js';
+import {
+  assertSourceManagedDeleteAllowed,
+  assertSourceManagedUpdateAllowed,
+  ODOO_MANAGED_PRICE_MESSAGE,
+} from '../rules/source-ownership.rules.js';
 import { ProductAdmission } from './product-admission.js';
 import { ProductChangeReporter } from './product-change.reporter.js';
 
@@ -111,6 +117,10 @@ export class ProductsService {
   ): Promise<ProductDetail> {
     const draft = normalizeDraft(input);
     await this.assertOwnVariants(workspaceId, productId, draft);
+    const existing = await this.products.findDetail(workspaceId, productId);
+    if (existing) {
+      assertSourceManagedUpdateAllowed(existing, draft);
+    }
     await this.admission.assertUpdatable(workspaceId, productId, draft);
     await this.updateWriter.update(workspaceId, productId, draft, actor);
     const product = await this.get(workspaceId, productId);
@@ -153,7 +163,12 @@ export class ProductsService {
     patch: VariantPricePatch,
     actor: Actor,
   ): Promise<ProductDetail> {
-    if (!(await this.updateWriter.updateVariantPrice(ref, normalizePricePatch(patch)))) {
+    const normalized = normalizePricePatch(patch);
+    const existing = await this.products.findDetail(ref.workspaceId, ref.productId);
+    if (existing?.sourceKind === CatalogSourceKind.ODOO && normalized.price !== undefined) {
+      throw new BadRequestException(ODOO_MANAGED_PRICE_MESSAGE);
+    }
+    if (!(await this.updateWriter.updateVariantPrice(ref, normalized))) {
       throw new NotFoundException(VARIANT_NOT_FOUND);
     }
     const product = await this.get(ref.workspaceId, ref.productId);
@@ -166,6 +181,10 @@ export class ProductsService {
   }
 
   async delete(workspaceId: string, productId: string, actor: Actor): Promise<void> {
+    const existing = await this.products.findDetail(workspaceId, productId);
+    if (existing) {
+      assertSourceManagedDeleteAllowed(existing.sourceKind);
+    }
     await this.changes.deleting(workspaceId, [productId]);
     const deleted = await this.products.delete(workspaceId, productId);
     if (!deleted) {

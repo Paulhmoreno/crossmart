@@ -1,5 +1,10 @@
 import type { WorkspaceSettingsRepository } from '../../workspace-settings/workspace-settings.repository.js';
-import { ChannelConnectionStatus, ListingStatus, Prisma } from '@crossmart/database';
+import {
+  CatalogSourceKind,
+  ChannelConnectionStatus,
+  ListingStatus,
+  Prisma,
+} from '@crossmart/database';
 import { StockLevel } from '../../inventory/enums/stock-level.enum.js';
 import { LOW_STOCK_THRESHOLD } from '../../inventory/inventory.constants.js';
 import type { InventoryReportRepository } from '../repositories/inventory-report.repository.js';
@@ -37,7 +42,7 @@ function setup() {
           productId: 'p-1',
           sku: 'MUG-BLUE',
           optionValues: ['Blue'],
-          product: { title: 'Mug', media: [] },
+          product: { title: 'Mug', sourceKind: CatalogSourceKind.MANUAL, media: [] },
         },
       },
     ]),

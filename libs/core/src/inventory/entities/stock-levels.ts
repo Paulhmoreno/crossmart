@@ -1,4 +1,4 @@
-import type { InventoryMovementReason } from '@crossmart/database';
+import type { CatalogSourceKind, InventoryMovementReason } from '@crossmart/database';
 import type { Actor } from '../../activity/entities/actor.js';
 
 /** The stock item of a variant, found by its SKU. */
@@ -7,6 +7,7 @@ export interface StockItemBySku {
   productId: string;
   sku: string;
   tracked: boolean;
+  sourceKind: CatalogSourceKind;
 }
 
 /** The available stock one item should hold, such as a row of an inventory file. */

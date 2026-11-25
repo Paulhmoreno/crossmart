@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable } from '@nestjs/common';
 import type { ActivityEntry } from '../../activity/entities/activity-entry.js';
 import type { Actor } from '../../activity/entities/actor.js';
 import { ActivityAction } from '../../activity/enums/activity-action.enum.js';
@@ -9,6 +9,10 @@ import { CatalogChangeKind } from '../../events/enums/catalog-change-kind.enum.j
 import type { BulkProductChange, BulkProductResult } from '../entities/bulk-product-change.js';
 import { BulkProductAction } from '../enums/bulk-product-action.enum.js';
 import { ProductBulkWriter } from '../repositories/product-bulk.writer.js';
+import {
+  ODOO_MANAGED_BULK_PRICE_MESSAGE,
+  ODOO_MANAGED_DELETE_MESSAGE,
+} from '../rules/source-ownership.rules.js';
 
 const TAG_SEPARATOR = ', ';
 
@@ -28,6 +32,18 @@ export class BulkProductActionsService {
     actor: Actor,
   ): Promise<BulkProductResult> {
     const ids = [...new Set(productIds)];
+    if (
+      change.action === BulkProductAction.AdjustPrices ||
+      change.action === BulkProductAction.Delete
+    ) {
+      const managedCount = await this.writer.countSourceManaged(workspaceId, ids);
+      if (managedCount > 0) {
+        if (change.action === BulkProductAction.Delete) {
+          throw new ConflictException(ODOO_MANAGED_DELETE_MESSAGE);
+        }
+        throw new BadRequestException(ODOO_MANAGED_BULK_PRICE_MESSAGE);
+      }
+    }
     if (change.action === BulkProductAction.Delete) {
       await this.events.productsDeleting({ workspaceId, productIds: ids });
     }

@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { Prisma, PrismaService, type ProductStatus } from '@crossmart/database';
+import { CatalogSourceKind, Prisma, PrismaService, type ProductStatus } from '@crossmart/database';
 import { ProductWebhookEvents } from './product-webhook-events.js';
 
 const PERCENT = 100;
@@ -17,6 +17,12 @@ export class ProductBulkWriter {
     private readonly prisma: PrismaService,
     private readonly webhookEvents: ProductWebhookEvents,
   ) {}
+
+  countSourceManaged(workspaceId: string, productIds: string[]): Promise<number> {
+    return this.prisma.product.count({
+      where: { workspaceId, id: { in: productIds }, sourceKind: CatalogSourceKind.ODOO },
+    });
+  }
 
   setStatus(workspaceId: string, productIds: string[], status: ProductStatus): Promise<number> {
     return this.updateAndPublish(workspaceId, productIds, async (tx) => {

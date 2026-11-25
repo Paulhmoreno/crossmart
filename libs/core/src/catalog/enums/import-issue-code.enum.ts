@@ -20,4 +20,6 @@ export enum ImportIssueCode {
   UnmatchedVariant = 'unmatched_variant',
   /** The matching catalog product is already linked to another product of the same channel account. */
   AlreadyLinked = 'already_linked',
+  /** The product or stock item is managed by an authoritative ERP source such as Odoo. */
+  SourceManaged = 'source_managed',
 }

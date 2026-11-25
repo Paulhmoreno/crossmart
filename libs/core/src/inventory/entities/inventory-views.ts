@@ -1,6 +1,6 @@
 import type { SortDirection } from '@crossmart/common';
 import type { InventorySort } from '../enums/inventory-sort.enum.js';
-import type { InventoryMovementReason } from '@crossmart/database';
+import type { CatalogSourceKind, InventoryMovementReason } from '@crossmart/database';
 import type { StockLevel } from '../enums/stock-level.enum.js';
 
 /** The stock of one variant, as the inventory list shows it. */
@@ -9,6 +9,7 @@ export interface InventoryRow {
   variantId: string;
   productId: string;
   productTitle: string;
+  sourceKind: CatalogSourceKind;
   optionValues: string[];
   sku: string | null;
   imageUrl: string | null;

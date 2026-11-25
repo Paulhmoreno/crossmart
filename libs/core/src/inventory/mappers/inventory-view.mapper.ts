@@ -12,6 +12,7 @@ export function toInventoryRow(record: InventoryRowRecord): InventoryRow {
     variantId: record.variantId,
     productId: variant.productId,
     productTitle: variant.product.title,
+    sourceKind: variant.product.sourceKind,
     optionValues: variant.optionValues,
     sku: variant.sku,
     imageUrl: variant.product.media[0]?.url ?? null,

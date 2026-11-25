@@ -1,4 +1,4 @@
-import { OutOfStockPolicy, Prisma, ProductStatus } from '@crossmart/database';
+import { CatalogSourceKind, OutOfStockPolicy, Prisma, ProductStatus } from '@crossmart/database';
 import type { CatalogFileParser, CatalogParseResult } from '../../entities/catalog-import.js';
 import type { ProductDraft } from '../../entities/product-draft.js';
 import { CatalogImportFormat } from '../../enums/catalog-import-format.enum.js';
@@ -24,6 +24,7 @@ const TITLE_SKU_PRICE = new Set([
 function target(id: string, handle: string, sku: string): ProductUpdateTargetRecord {
   return {
     id,
+    sourceKind: CatalogSourceKind.MANUAL,
     handle,
     title: handle,
     descriptionHtml: '<p>Kept</p>',

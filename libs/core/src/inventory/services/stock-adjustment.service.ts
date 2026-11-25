@@ -1,7 +1,9 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { CatalogSourceKind } from '@crossmart/database';
 import { ActivityAction } from '../../activity/enums/activity-action.enum.js';
 import { ActivitySubjectType } from '../../activity/enums/activity-subject-type.enum.js';
 import { ActivityRecorder } from '../../activity/services/activity-recorder.js';
+import { ODOO_MANAGED_STOCK_MESSAGE } from '../../catalog/rules/source-ownership.rules.js';
 import { CatalogEventBus } from '../../events/services/catalog-event-bus.js';
 import type { InventoryRow } from '../entities/inventory-views.js';
 import type { StockAdjustment, StockSnapshot } from '../entities/stock-adjustment.js';
@@ -41,6 +43,13 @@ export class StockAdjustmentService {
   ): Promise<InventoryRow> {
     if (!MANUAL_MOVEMENT_REASONS.includes(adjustment.reason)) {
       throw new BadRequestException(SYSTEM_REASON);
+    }
+    const existing = await this.items.findRow(workspaceId, inventoryItemId);
+    if (!existing) {
+      throw new NotFoundException(INVENTORY_ITEM_NOT_FOUND);
+    }
+    if (existing.variant.product.sourceKind === CatalogSourceKind.ODOO) {
+      throw new BadRequestException(ODOO_MANAGED_STOCK_MESSAGE);
     }
     const delta = await this.writer.adjust(workspaceId, inventoryItemId, adjustment, (stock) =>
       this.resolveDelta(stock, adjustment),

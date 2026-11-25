@@ -1,4 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
+import { CatalogSourceKind } from '@crossmart/database';
 import { CATALOG_FILE_PARSERS } from '../../catalog.constants.js';
 import type {
   CatalogFileParser,
@@ -87,14 +88,21 @@ export class UpdateProductsStrategy implements CatalogImportStrategy {
     const matched: MatchedProducts = { replacements: [], notFound: [], failed: [] };
     for (const values of parsed.products) {
       const target = targetByHandle.get(values.handle);
-      if (target) {
-        this.merge(target, new ProductPatch(values, parsed.fields), parsed, matched);
-      } else {
+      if (!target) {
         matched.notFound.push({
           code: ImportIssueCode.NotFound,
           message: 'No product with this handle is in the catalog; nothing was updated',
           handle: values.handle,
         });
+      } else if (target.sourceKind === CatalogSourceKind.ODOO) {
+        matched.failed.push({
+          code: ImportIssueCode.SourceManaged,
+          message:
+            'This product is managed by Odoo and cannot be overwritten through a file import',
+          handle: values.handle,
+        });
+      } else {
+        this.merge(target, new ProductPatch(values, parsed.fields), parsed, matched);
       }
     }
     return matched;

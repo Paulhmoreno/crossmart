@@ -53,11 +53,25 @@ export class InventoryItemRepository {
   async findBySkus(workspaceId: string, skus: string[]): Promise<StockItemBySku[]> {
     const items = await this.prisma.inventoryItem.findMany({
       where: { workspaceId, variant: { sku: { in: skus } } },
-      select: { id: true, tracked: true, variant: { select: { sku: true, productId: true } } },
+      select: {
+        id: true,
+        tracked: true,
+        variant: {
+          select: { sku: true, productId: true, product: { select: { sourceKind: true } } },
+        },
+      },
     });
     return items.flatMap(({ id, tracked, variant }) =>
       variant.sku
-        ? [{ inventoryItemId: id, productId: variant.productId, sku: variant.sku, tracked }]
+        ? [
+            {
+              inventoryItemId: id,
+              productId: variant.productId,
+              sku: variant.sku,
+              tracked,
+              sourceKind: variant.product.sourceKind,
+            },
+          ]
         : [],
     );
   }

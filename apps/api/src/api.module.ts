@@ -20,6 +20,7 @@ import { InventoryApiModule } from './inventory/inventory.module.js';
 import { ListingsApiModule } from './listings/listings.module.js';
 import { MediaMaintenanceModule } from './media/media-maintenance.module.js';
 import { AnalyticsApiModule } from './analytics/analytics.module.js';
+import { OdooApiModule } from './odoo/odoo-api.module.js';
 import { OrdersApiModule } from './orders/orders.module.js';
 import { SandboxApiModule } from './sandbox/sandbox-api.module.js';
 import { SuggestionsApiModule } from './suggestions/suggestions.module.js';
@@ -45,6 +46,7 @@ import { WorkspacesModule } from './workspaces/workspaces.module.js';
     ActivityApiModule,
     InventoryApiModule,
     ChannelsApiModule,
+    OdooApiModule,
     ListingsApiModule,
     OrdersApiModule,
     AnalyticsApiModule,

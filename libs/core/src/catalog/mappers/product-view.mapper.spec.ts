@@ -1,5 +1,10 @@
 import { ChannelType } from '@crossmart/connectors';
-import { ListingSource, ListingStatus, ProductStatus } from '@crossmart/database';
+import {
+  CatalogSourceKind,
+  ListingSource,
+  ListingStatus,
+  ProductStatus,
+} from '@crossmart/database';
 import type { ProductSummaryRecord } from '../repositories/product.queries.js';
 import { toProductSummary } from './product-view.mapper.js';
 
@@ -18,6 +23,10 @@ function record(listings: ProductSummaryRecord['listings']): ProductSummaryRecor
   return {
     id: 'p-1',
     workspaceId: 'ws-1',
+    sourceKind: CatalogSourceKind.MANUAL,
+    sourceConnectionId: null,
+    sourceExternalId: null,
+    sourceMetadata: null,
     handle: 'mug',
     title: 'Mug',
     descriptionHtml: '',

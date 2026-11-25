@@ -1,5 +1,6 @@
 import { ChannelType } from '@crossmart/connectors';
 import {
+  CatalogSourceKind,
   ChannelConnectionStatus,
   ListingSource,
   ListingStatus,
@@ -24,6 +25,7 @@ const AT = new Date('2026-11-03T09:00:00Z');
 export function variantView(overrides: Partial<VariantView> = {}): VariantView {
   return {
     id: VARIANT_ID,
+    sourceExternalId: null,
     position: 0,
     sku: 'MUG-1',
     barcode: null,
@@ -46,6 +48,10 @@ export function productDetail(overrides: Partial<ProductDetail> = {}): ProductDe
     id: PRODUCT_ID,
     handle: 'mug',
     title: 'Mug',
+    sourceKind: CatalogSourceKind.MANUAL,
+    sourceConnectionId: null,
+    sourceExternalId: null,
+    sourceMetadata: null,
     descriptionHtml: '<p>Stoneware.</p>',
     vendor: 'Acme',
     productType: 'Mugs',
@@ -55,9 +61,22 @@ export function productDetail(overrides: Partial<ProductDetail> = {}): ProductDe
     optionNames: ['Color'],
     variants: [variantView()],
     media: [
-      { id: 'm1', url: 'https://cdn.example.com/1.jpg', altText: 'Front', position: 0 },
-      { id: 'm2', url: 'https://cdn.example.com/2.jpg', altText: null, position: 1 },
+      {
+        id: 'm1',
+        url: 'https://cdn.example.com/1.jpg',
+        altText: 'Front',
+        position: 0,
+        sourceManaged: false,
+      },
+      {
+        id: 'm2',
+        url: 'https://cdn.example.com/2.jpg',
+        altText: null,
+        position: 1,
+        sourceManaged: false,
+      },
     ],
+    documents: [],
     createdAt: AT,
     updatedAt: AT,
     ...overrides,

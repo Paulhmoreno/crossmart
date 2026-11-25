@@ -22,4 +22,6 @@ export enum QueueName {
   Storage = 'storage',
   /** Housekeeping on a schedule, such as deleting unused agent registrations. */
   Maintenance = 'maintenance',
+  /** Read-only catalog and inventory sync jobs from Odoo ERP sources. */
+  OdooSync = 'odoo-sync',
 }

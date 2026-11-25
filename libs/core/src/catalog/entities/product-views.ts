@@ -1,10 +1,12 @@
 import type { SortDirection } from '@crossmart/common';
 import type { ChannelType } from '@crossmart/connectors';
 import type {
+  CatalogSourceKind,
   ListingSource,
   ListingStatus,
   OutOfStockPolicy,
   ProductCondition,
+  ProductDocumentKind,
   ProductStatus,
 } from '@crossmart/database';
 import type { CatalogGap } from '../enums/catalog-gap.enum.js';
@@ -30,6 +32,8 @@ export interface ProductSummary {
   id: string;
   handle: string;
   title: string;
+  sourceKind: CatalogSourceKind;
+  sourceExternalId: string | null;
   status: ProductStatus;
   condition: ProductCondition | null;
   vendor: string | null;
@@ -54,6 +58,7 @@ export interface ProductPage {
 
 export interface VariantView {
   id: string;
+  sourceExternalId: string | null;
   position: number;
   sku: string | null;
   barcode: string | null;
@@ -75,12 +80,28 @@ export interface MediaView {
   url: string;
   altText: string | null;
   position: number;
+  sourceManaged: boolean;
+}
+
+export interface ProductDocumentView {
+  id: string;
+  sourceExternalId: string;
+  name: string;
+  mimetype: string;
+  byteSize: number | null;
+  kind: ProductDocumentKind;
+  isPublic: boolean;
+  createdAt: Date;
 }
 
 export interface ProductDetail {
   id: string;
   handle: string;
   title: string;
+  sourceKind: CatalogSourceKind;
+  sourceConnectionId: string | null;
+  sourceExternalId: string | null;
+  sourceMetadata: Record<string, unknown> | null;
   descriptionHtml: string;
   vendor: string | null;
   productType: string | null;
@@ -91,6 +112,7 @@ export interface ProductDetail {
   optionNames: string[];
   variants: VariantView[];
   media: MediaView[];
+  documents: ProductDocumentView[];
   createdAt: Date;
   updatedAt: Date;
 }

@@ -1,6 +1,6 @@
 import { SortDirection } from '@crossmart/common';
 import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
-import { OutOfStockPolicy, Prisma, ProductStatus } from '@crossmart/database';
+import { CatalogSourceKind, OutOfStockPolicy, Prisma, ProductStatus } from '@crossmart/database';
 import { Actor } from '../../activity/entities/actor.js';
 import { ActivityAction } from '../../activity/enums/activity-action.enum.js';
 import { ActivitySubjectType } from '../../activity/enums/activity-subject-type.enum.js';
@@ -32,6 +32,10 @@ function summaryRecord(id: string, prices: string[]): ProductSummaryRecord {
   return {
     id,
     workspaceId: WORKSPACE_ID,
+    sourceKind: CatalogSourceKind.MANUAL,
+    sourceConnectionId: null,
+    sourceExternalId: null,
+    sourceMetadata: null,
     handle: id,
     title: id,
     descriptionHtml: '',
@@ -54,7 +58,7 @@ function summaryRecord(id: string, prices: string[]): ProductSummaryRecord {
 
 function detailRecord(id: string, title: string): ProductDetailRecord {
   const { variants: _variants, media: _media, ...product } = summaryRecord(id, []);
-  return { ...product, title, variants: [], media: [] };
+  return { ...product, title, variants: [], media: [], documents: [] };
 }
 
 const DRAFT: ProductDraft = {

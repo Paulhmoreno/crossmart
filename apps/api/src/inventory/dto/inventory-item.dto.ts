@@ -1,5 +1,7 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { type InventoryPage, type InventoryRow, StockLevel } from '@crossmart/core';
+import { CatalogSourceKind } from '@crossmart/database';
+import { CATALOG_SOURCE_KIND_SCHEMA_NAME } from '../../catalog/catalog.constants.js';
 import { STOCK_LEVEL_SCHEMA_NAME } from '../inventory.constants.js';
 
 export class InventoryItemDto implements InventoryRow {
@@ -14,6 +16,9 @@ export class InventoryItemDto implements InventoryRow {
 
   @ApiProperty()
   productTitle: string;
+
+  @ApiProperty({ enum: CatalogSourceKind, enumName: CATALOG_SOURCE_KIND_SCHEMA_NAME })
+  sourceKind: CatalogSourceKind;
 
   @ApiProperty({ type: [String], description: 'One value per product option, in order' })
   optionValues: string[];

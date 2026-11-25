@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { InventoryMovementReason } from '@crossmart/database';
+import { CatalogSourceKind, InventoryMovementReason } from '@crossmart/database';
 import { STOCK_FILE_PARSERS } from '../../catalog.constants.js';
 import type {
   CatalogImportRequest,
@@ -71,6 +71,13 @@ export class UpdateStockStrategy implements CatalogImportStrategy {
         plan.failed.push({
           code: ImportIssueCode.UnknownSku,
           message: 'No variant in the catalog has this SKU',
+          sku,
+          row,
+        });
+      } else if (item.sourceKind === CatalogSourceKind.ODOO) {
+        plan.skipped.push({
+          code: ImportIssueCode.SourceManaged,
+          message: 'Stock for this variant is managed by Odoo and cannot be changed by file import',
           sku,
           row,
         });
