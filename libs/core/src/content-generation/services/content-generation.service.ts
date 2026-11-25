@@ -28,7 +28,7 @@ export class ContentGenerationService {
     request: ContentGenerationRequest,
     actor: Actor,
   ): Promise<ContentGenerationReceipt> {
-    this.ai.assertConfigured();
+    await this.ai.assertConfiguredForWorkspace(request.workspaceId);
     const { store, products } = await this.validator.validate(request);
     const { workspaceId, connectionId } = request;
     await this.queue.enqueue(

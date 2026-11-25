@@ -43,6 +43,7 @@ model User {
   activityApproved         ActivityEvent[]           @relation("ActivityApprovedBy")
   odooConnections          OdooConnection[]
   odooSyncRuns             OdooSyncRun[]
+  updatedAiConfigs         WorkspaceAiConfig[]       @relation("WorkspaceAiConfigUpdatedBy")
   createdAt                DateTime                  @default(now()) @map("created_at")
   updatedAt                DateTime                  @updatedAt @map("updated_at")
 
@@ -349,6 +350,7 @@ model Workspace {
   agentProposals           AgentProposal[]
   odooConnection           OdooConnection?
   odooSyncRuns             OdooSyncRun[]
+  aiConfig                 WorkspaceAiConfig?
   createdAt                DateTime                  @default(now()) @map("created_at")
   updatedAt                DateTime                  @updatedAt @map("updated_at")
 
@@ -1908,4 +1910,41 @@ model OdooSyncRun {
   @@index([workspaceId, createdAt(sort: Desc)])
   @@index([connectionId, createdAt(sort: Desc)])
   @@map("odoo_sync_runs")
+}
+
+// ─── Workspace AI Configuration ───────────────────────────────────────────────
+
+enum AiConfigStatus {
+  CONNECTED
+  ERROR
+  DISABLED
+
+  @@map("ai_config_status")
+}
+
+/// Per-workspace AI provider configuration (Anthropic or OpenAI-compatible).
+model WorkspaceAiConfig {
+  id                String         @id @default(uuid()) @db.Uuid
+  workspaceId       String         @unique @map("workspace_id") @db.Uuid
+  workspace         Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  /// An `AiProviderName` value: `anthropic` or `openai_compatible`.
+  provider          String
+  /// Configured API base URL for OpenAI-compatible servers. Null for default Anthropic.
+  baseUrl           String?        @map("base_url")
+  /// Configured model identifier.
+  model             String
+  /// Sealed JSON `{ apiKey }` encrypted with the workspace data key. Null when cleared or keyless local server.
+  sealedCredentials String?        @map("sealed_credentials")
+  status            AiConfigStatus @default(CONNECTED)
+  /// Verified provider/model capabilities JSON.
+  capabilities      Json           @default("{}")
+  /// Short user-facing error from the last test or failed call. Never holds secrets.
+  lastError         String?        @map("last_error")
+  lastTestedAt      DateTime?      @map("last_tested_at")
+  updatedById       String?        @map("updated_by_id") @db.Uuid
+  updatedBy         User?          @relation("WorkspaceAiConfigUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+  createdAt         DateTime       @default(now()) @map("created_at")
+  updatedAt         DateTime       @updatedAt @map("updated_at")
+
+  @@map("workspace_ai_configs")
 }

@@ -351,6 +351,14 @@ const ACTION_WORDING: Record<ActivityAction, ActionWording> = {
     describe: (entry) =>
       withDetail(`Synced ${countOfProducts(entry)} from Odoo${named(entry)}`, entry),
   },
+  [ActivityAction.AiConfigUpdated]: {
+    operation: 'Updating AI configuration',
+    describe: (entry) => withDetail(`Updated AI configuration${named(entry)}`, entry),
+  },
+  [ActivityAction.AiConfigCleared]: {
+    operation: 'Clearing AI configuration',
+    describe: (entry) => `Cleared AI configuration${named(entry)}`,
+  },
 };
 
 /** The one-line, human-readable text of an event, as stored and shown in the log. */

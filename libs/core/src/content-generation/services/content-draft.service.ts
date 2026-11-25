@@ -28,7 +28,7 @@ export class ContentDraftService {
   ) {}
 
   async draft(request: ContentDraftRequest): Promise<ContentDraft> {
-    this.ai.assertConfigured();
+    await this.ai.assertConfiguredForWorkspace(request.workspaceId);
     const target = await this.targets.load(request);
     const fields = new Set(request.fields);
     const { output } = await this.ai.generate(

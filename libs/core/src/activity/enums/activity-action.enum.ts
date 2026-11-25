@@ -143,4 +143,8 @@ export enum ActivityAction {
   OdooSyncRequested = 'odoo_sync_requested',
   /** An Odoo catalog sync job finished. */
   OdooSyncCompleted = 'odoo_sync_completed',
+  /** A workspace's AI provider configuration was saved or updated. */
+  AiConfigUpdated = 'ai_config_updated',
+  /** A workspace's AI provider configuration was cleared. */
+  AiConfigCleared = 'ai_config_cleared',
 }

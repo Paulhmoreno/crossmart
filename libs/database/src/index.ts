@@ -4,6 +4,7 @@ export * from './prisma-errors.js';
 export {
   ActivityActorType,
   ActivityOutcome,
+  AiConfigStatus,
   BillingInterval,
   CatalogSourceKind,
   ChannelConnectionStatus,
@@ -69,6 +70,7 @@ export type {
   WebhookEndpoint,
   WebhookEvent,
   Workspace,
+  WorkspaceAiConfig,
   WorkspaceDataKey,
   WorkspaceMember,
 } from './generated/prisma/client.js';

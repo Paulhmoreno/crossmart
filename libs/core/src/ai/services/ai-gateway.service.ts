@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { AI_CREDITS_PER_CALL } from '../../entitlements/entitlements.constants.js';
 import { Feature } from '../../entitlements/enums/feature.enum.js';
 import { SandboxRestriction } from '../../entitlements/enums/sandbox-restriction.enum.js';
@@ -21,6 +21,7 @@ import type { AiFeature } from '../enums/ai-feature.enum.js';
 import { AiNotConfiguredError, AiOutputRejectedError } from '../errors/ai.errors.js';
 import { AiProvider } from '../providers/ai-provider.js';
 import { parseStructuredOutput } from '../rules/structured-output.js';
+import { AiConfigService } from './ai-config.service.js';
 import { AiUsageService } from './ai-usage.service.js';
 
 const ONE_CALL = 1;
@@ -38,6 +39,7 @@ export class AiGateway {
     private readonly provider: AiProvider,
     private readonly usage: AiUsageService,
     private readonly entitlements: EntitlementService,
+    @Optional() private readonly configs?: AiConfigService,
   ) {}
 
   status(): AiStatus {
@@ -48,9 +50,30 @@ export class AiGateway {
     };
   }
 
+  async statusForWorkspace(workspaceId: string): Promise<AiStatus> {
+    if (!this.configs) return this.status();
+    const view = await this.configs.getConfig(workspaceId);
+    return {
+      configured: view.configured,
+      provider: view.provider,
+      model: view.model,
+    };
+  }
+
   /** Throws `AiNotConfiguredError` when no provider key is set, so callers can refuse early. */
   assertConfigured(): void {
     if (!this.provider.isConfigured()) {
+      throw new AiNotConfiguredError();
+    }
+  }
+
+  async assertConfiguredForWorkspace(workspaceId: string): Promise<void> {
+    if (!this.configs) {
+      this.assertConfigured();
+      return;
+    }
+    const resolved = await this.configs.resolveForWorkspace(workspaceId);
+    if (!resolved.configured) {
       throw new AiNotConfiguredError();
     }
   }
@@ -74,11 +97,21 @@ export class AiGateway {
     context: AiCallContext,
     request: AiStructuredRequest<Output>,
   ): Promise<AiGeneration<Output>> {
-    this.assertConfigured();
+    const resolved = await this.resolveProvider(context.workspaceId);
     await this.assertCredits(context.workspaceId);
-    const completion = await this.provider.complete(request);
-    await this.meter(context, completion);
-    return this.validate(context.feature, completion, request);
+    const effectiveRequest = resolved.forceModel
+      ? { ...request, model: resolved.provider.model }
+      : request;
+    let completion: AiCompletion;
+    try {
+      completion = await resolved.provider.complete(effectiveRequest);
+      await this.configs?.recordCallOutcome(context.workspaceId, null);
+    } catch (error) {
+      await this.configs?.recordCallOutcome(context.workspaceId, error);
+      throw error;
+    }
+    await this.meter(context, resolved.provider.name, completion);
+    return this.validate(context.feature, completion, effectiveRequest);
   }
 
   /**
@@ -91,13 +124,23 @@ export class AiGateway {
     request: AiConversationRequest,
     listener: AiConversationListener,
   ): Promise<AiConversationReply> {
-    this.assertConfigured();
+    const resolved = await this.resolveProvider(context.workspaceId);
     await this.assertCredits(context.workspaceId);
-    const reply = await this.provider.converse(request, listener);
+    const effectiveRequest = resolved.forceModel
+      ? { ...request, model: resolved.provider.model }
+      : request;
+    let reply: AiConversationReply;
+    try {
+      reply = await resolved.provider.converse(effectiveRequest, listener);
+      await this.configs?.recordCallOutcome(context.workspaceId, null);
+    } catch (error) {
+      await this.configs?.recordCallOutcome(context.workspaceId, error);
+      throw error;
+    }
     await this.usage.record({
       workspaceId: context.workspaceId,
       feature: context.feature,
-      provider: this.provider.name,
+      provider: resolved.provider.name,
       model: reply.model,
       ...reply.usage,
     });
@@ -124,6 +167,21 @@ export class AiGateway {
     return this.validate(context.feature, completion, request);
   }
 
+  private async resolveProvider(workspaceId: string): Promise<{
+    provider: AiProvider;
+    forceModel: boolean;
+  }> {
+    if (!this.configs) {
+      this.assertConfigured();
+      return { provider: this.provider, forceModel: false };
+    }
+    const resolved = await this.configs.resolveForWorkspace(workspaceId);
+    if (!resolved.configured) {
+      throw new AiNotConfiguredError();
+    }
+    return { provider: resolved.provider, forceModel: resolved.forceModel };
+  }
+
   private validate<Output>(
     feature: AiFeature,
     completion: AiCompletion,
@@ -139,11 +197,15 @@ export class AiGateway {
     }
   }
 
-  private meter(context: AiCallContext, completion: AiCompletion): Promise<void> {
+  private meter(
+    context: AiCallContext,
+    provider: AiProvider['name'],
+    completion: AiCompletion,
+  ): Promise<void> {
     return this.usage.record({
       workspaceId: context.workspaceId,
       feature: context.feature,
-      provider: this.provider.name,
+      provider,
       model: completion.model,
       ...completion.usage,
     });

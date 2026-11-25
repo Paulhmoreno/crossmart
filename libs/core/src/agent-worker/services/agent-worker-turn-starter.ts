@@ -46,7 +46,7 @@ export class AgentWorkerTurnStarter {
       request.owner,
       request.conversationId,
     );
-    this.ai.assertConfigured();
+    await this.ai.assertConfiguredForWorkspace(request.owner.workspaceId);
     await this.ai.assertCredits(request.owner.workspaceId);
     const tools = await this.toolbox.toolsForMember(request.owner);
     const turn = await this.begin(conversation.id, AgentWorkerTurnTrigger.Message);

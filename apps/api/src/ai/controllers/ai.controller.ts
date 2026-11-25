@@ -2,12 +2,14 @@ import {
   BadRequestException,
   Body,
   Controller,
+  Delete,
   Get,
   HttpCode,
   HttpStatus,
   Param,
   ParseUUIDPipe,
   Post,
+  Put,
   Query,
   UseGuards,
 } from '@nestjs/common';
@@ -22,6 +24,7 @@ import {
 import { Throttle } from '@nestjs/throttler';
 import {
   type Actor,
+  AiConfigService,
   AiGateway,
   type AiUsagePeriod,
   AiUsageService,
@@ -38,6 +41,9 @@ import { ApiSandboxRestrictedResponse } from '../../entitlements/decorators/api-
 import { RateLimitMessage } from '../../common/throttling/rate-limit-message.decorator.js';
 import { WorkspacePrincipalThrottlerGuard } from '../../common/throttling/workspace-principal-throttler.guard.js';
 import {
+  AI_CONFIG_MODELS_PATH,
+  AI_CONFIG_PATH,
+  AI_CONFIG_TEST_PATH,
   AI_RATE_LIMITED_MESSAGE,
   AI_ROUTE,
   AI_STATUS_PATH,
@@ -49,6 +55,14 @@ import {
   CONTENT_GENERATIONS_PATH,
   CONTENT_GENERATIONS_PER_WINDOW,
 } from '../ai.constants.js';
+import {
+  AiConfigDto,
+  ListAiModelsDto,
+  ListAiModelsResultDto,
+  SaveAiConfigDto,
+  TestAiConfigDto,
+  TestAiConfigResultDto,
+} from '../dto/ai-config.dto.js';
 import { AiStatusDto } from '../dto/ai-status.dto.js';
 import { AiUsageQueryDto, AiUsageReportDto } from '../dto/ai-usage.dto.js';
 import { ContentDraftDto, CreateContentDraftDto } from '../dto/content-draft.dto.js';
@@ -58,13 +72,14 @@ import { ContentGenerationReceiptDto, GenerateContentDto } from '../dto/content-
 const PERIOD_INCOMPLETE = 'Give both from and to, or neither';
 const PERIOD_REVERSED = 'from must be before to';
 
-/** The AI agents: whether they are available, what they used, and asking them for content. */
+/** The AI agents: whether they are available, provider config, what they used, and asking them for content. */
 @ApiTags(AI_TAG)
 @RateLimitMessage(AI_RATE_LIMITED_MESSAGE)
 @Controller(AI_ROUTE)
 export class AiController {
   constructor(
     private readonly ai: AiGateway,
+    private readonly aiConfig: AiConfigService,
     private readonly usage: AiUsageService,
     private readonly contentGeneration: ContentGenerationService,
     private readonly contentDrafts: ContentDraftService,
@@ -72,11 +87,72 @@ export class AiController {
 
   @Get(AI_STATUS_PATH)
   @RequirePermission(WorkspacePermission.ViewWorkspace)
-  @ApiOperation({ summary: 'Whether AI features are available on this server' })
+  @ApiOperation({ summary: 'Whether AI features are available for this workspace' })
   @ApiParam({ name: WORKSPACE_ID_PARAM, format: 'uuid' })
   @ApiOkResponse({ type: AiStatusDto })
-  status(): AiStatusDto {
-    return AiStatusDto.from(this.ai.status());
+  async status(
+    @Param(WORKSPACE_ID_PARAM, ParseUUIDPipe) workspaceId: string,
+  ): Promise<AiStatusDto> {
+    return AiStatusDto.from(await this.ai.statusForWorkspace(workspaceId));
+  }
+
+  @Get(AI_CONFIG_PATH)
+  @RequirePermission(WorkspacePermission.ManageWorkspace)
+  @ApiOperation({ summary: 'Read the workspace AI provider configuration (never returns secrets)' })
+  @ApiOkResponse({ type: AiConfigDto })
+  async getConfig(
+    @Param(WORKSPACE_ID_PARAM, ParseUUIDPipe) workspaceId: string,
+  ): Promise<AiConfigDto> {
+    return AiConfigDto.from(await this.aiConfig.getConfig(workspaceId));
+  }
+
+  @Put(AI_CONFIG_PATH)
+  @RequirePermission(WorkspacePermission.ManageWorkspace)
+  @ApiOperation({ summary: 'Save the workspace AI provider configuration with encrypted API key' })
+  @ApiOkResponse({ type: AiConfigDto })
+  async saveConfig(
+    @Param(WORKSPACE_ID_PARAM, ParseUUIDPipe) workspaceId: string,
+    @Body() body: SaveAiConfigDto,
+    @CurrentActor() actor: Actor,
+  ): Promise<AiConfigDto> {
+    return AiConfigDto.from(await this.aiConfig.saveConfig(workspaceId, body, actor));
+  }
+
+  @Delete(AI_CONFIG_PATH)
+  @RequirePermission(WorkspacePermission.ManageWorkspace)
+  @ApiOperation({
+    summary: 'Clear the workspace AI provider configuration and wipe its stored key',
+  })
+  @ApiOkResponse({ type: AiConfigDto })
+  async clearConfig(
+    @Param(WORKSPACE_ID_PARAM, ParseUUIDPipe) workspaceId: string,
+    @CurrentActor() actor: Actor,
+  ): Promise<AiConfigDto> {
+    return AiConfigDto.from(await this.aiConfig.clearConfig(workspaceId, actor));
+  }
+
+  @Post(AI_CONFIG_TEST_PATH)
+  @HttpCode(HttpStatus.OK)
+  @RequirePermission(WorkspacePermission.ManageWorkspace)
+  @ApiOperation({ summary: 'Test AI provider credentials and probe model capabilities' })
+  @ApiOkResponse({ type: TestAiConfigResultDto })
+  async testConfig(
+    @Param(WORKSPACE_ID_PARAM, ParseUUIDPipe) workspaceId: string,
+    @Body() body: TestAiConfigDto,
+  ): Promise<TestAiConfigResultDto> {
+    return TestAiConfigResultDto.from(await this.aiConfig.testConfig(workspaceId, body));
+  }
+
+  @Post(AI_CONFIG_MODELS_PATH)
+  @HttpCode(HttpStatus.OK)
+  @RequirePermission(WorkspacePermission.ManageWorkspace)
+  @ApiOperation({ summary: 'List models exposed by an OpenAI-compatible endpoint when supported' })
+  @ApiOkResponse({ type: ListAiModelsResultDto })
+  async listModels(
+    @Param(WORKSPACE_ID_PARAM, ParseUUIDPipe) workspaceId: string,
+    @Body() body: ListAiModelsDto,
+  ): Promise<ListAiModelsResultDto> {
+    return ListAiModelsResultDto.from(await this.aiConfig.listModels(workspaceId, body));
   }
 
   @Get(AI_USAGE_PATH)
