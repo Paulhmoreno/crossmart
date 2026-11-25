@@ -67,4 +67,20 @@ describe('LocalFileStorage', () => {
       /escapes/,
     );
   });
+
+  it('reads stored files back by public URL and returns null for foreign or missing URLs', async () => {
+    const stored = await storage.put('ws/photo.webp', Buffer.from('webp-bytes'), 'image/webp');
+
+    const loaded = await storage.readByUrl(stored.url);
+    expect(loaded).toEqual({
+      bytes: Buffer.from('webp-bytes'),
+      contentType: 'image/webp',
+      fileName: 'photo.webp',
+    });
+    expect(await storage.readByUrl('https://cdn.example.com/ws/photo.webp')).toBeNull();
+    expect(await storage.readByUrl('http://localhost:3000/media/ws/missing.png')).toBeNull();
+    await expect(storage.readByUrl('http://localhost:3000/media/../escape.png')).rejects.toThrow(
+      /escapes/,
+    );
+  });
 });

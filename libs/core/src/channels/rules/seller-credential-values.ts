@@ -10,7 +10,7 @@ import {
 
 /** What is wrong with one field's value, or null; never the value itself, which may be a key. */
 function fieldProblem(field: SellerCredentialField, value: string): string | null {
-  if (value.length === 0) return CREDENTIALS_FIELD_MISSING;
+  if (value.length === 0) return field.optional ? null : CREDENTIALS_FIELD_MISSING;
   if (value.length > field.maxLength) return CREDENTIALS_FIELD_TOO_LONG;
   if (field.options && !field.options.includes(value)) return CREDENTIALS_FIELD_NOT_ALLOWED;
   return null;

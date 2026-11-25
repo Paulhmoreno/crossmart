@@ -14,6 +14,8 @@ import { GoogleMerchantConnector } from './google-merchant/google-merchant.conne
 import { GoogleMerchantConnectorModule } from './google-merchant/google-merchant-connector.module.js';
 import { ShopifyConnector } from './shopify/shopify.connector.js';
 import { ShopifyConnectorModule } from './shopify/shopify-connector.module.js';
+import { WooCommerceConnector } from './woocommerce/woocommerce.connector.js';
+import { WooCommerceConnectorModule } from './woocommerce/woocommerce-connector.module.js';
 
 /**
  * Every connector this instance ships, served by `ChannelConnectorRegistry`. A new channel is
@@ -27,6 +29,7 @@ import { ShopifyConnectorModule } from './shopify/shopify-connector.module.js';
     EtsyConnectorModule,
     MercadoLibreConnectorModule,
     FalabellaConnectorModule,
+    WooCommerceConnectorModule,
   ],
   providers: [
     {
@@ -38,6 +41,7 @@ import { ShopifyConnectorModule } from './shopify/shopify-connector.module.js';
         EtsyConnector,
         MercadoLibreConnector,
         FalabellaConnector,
+        WooCommerceConnector,
       ],
       useFactory: (...connectors: ChannelConnector[]): ChannelConnector[] => connectors,
     },
@@ -51,6 +55,7 @@ import { ShopifyConnectorModule } from './shopify/shopify-connector.module.js';
     EtsyConnectorModule,
     MercadoLibreConnectorModule,
     FalabellaConnectorModule,
+    WooCommerceConnectorModule,
   ],
 })
 export class ConnectorsModule {}

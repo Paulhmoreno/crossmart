@@ -21,20 +21,44 @@ import {
   CHANNEL_UNAVAILABLE_RESPONSE_DESCRIPTION,
   CREDENTIALS_PATH,
   CREDENTIALS_REJECTED_RESPONSE_DESCRIPTION,
+  CREDENTIALS_TEST_PATH,
 } from '../channels.constants.js';
 import {
   ConnectedChannelDto,
   ConnectWithCredentialsDto,
+  TestedCredentialsDto,
 } from '../dto/connect-with-credentials.dto.js';
 import { CredentialsRejectedErrorDto } from '../dto/credentials-rejected-error.dto.js';
 import { FalabellaCredentialsDto } from '../dto/falabella-credentials.dto.js';
+import { WooCommerceCredentialsDto } from '../dto/woocommerce-credentials.dto.js';
 
-/** Connects channels whose sellers paste the keys the channel issued them (Falabella). */
+/** Connects channels whose sellers paste the keys the channel issued them (Falabella, WooCommerce). */
 @ApiTags(CHANNELS_TAG)
-@ApiExtraModels(FalabellaCredentialsDto)
+@ApiExtraModels(FalabellaCredentialsDto, WooCommerceCredentialsDto)
 @Controller(CHANNEL_CONNECTIONS_ROUTE)
 export class ChannelCredentialsController {
   constructor(private readonly sellerCredentials: SellerCredentialsService) {}
+
+  @Post(CREDENTIALS_TEST_PATH)
+  @RequirePermission(WorkspacePermission.ManageChannels)
+  @ApiOperation({
+    summary: 'Test channel credentials with a read-only check without saving them',
+  })
+  @ApiCreatedResponse({ type: TestedCredentialsDto })
+  @ApiUnprocessableEntityResponse({
+    type: CredentialsRejectedErrorDto,
+    description: CREDENTIALS_REJECTED_RESPONSE_DESCRIPTION,
+  })
+  @ApiServiceUnavailableResponse({ description: CHANNEL_UNAVAILABLE_RESPONSE_DESCRIPTION })
+  @ApiSandboxRestrictedResponse()
+  async test(
+    @Param(WORKSPACE_ID_PARAM, ParseUUIDPipe) workspaceId: string,
+    @CurrentPrincipal() principal: Principal,
+    @Body() body: ConnectWithCredentialsDto,
+  ): Promise<TestedCredentialsDto> {
+    requireUser(principal);
+    return TestedCredentialsDto.from(await this.sellerCredentials.test(workspaceId, body));
+  }
 
   @Post(CREDENTIALS_PATH)
   @RequirePermission(WorkspacePermission.ManageChannels)

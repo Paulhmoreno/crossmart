@@ -22,6 +22,8 @@ export interface ImportPageContext {
   actor: Actor;
   /** When the page was written; the listings it touches are stamped with it. */
   syncedAt: Date;
+  /** False for channels (like WooCommerce) where slugs derive from names and only ID/SKU matches are safe. */
+  matchByHandle?: boolean;
 }
 
 /** A catalog variant, with what channel variants are matched on. */

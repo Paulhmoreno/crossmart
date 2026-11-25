@@ -5,6 +5,7 @@ export enum ChannelType {
   Etsy = 'etsy',
   MercadoLibre = 'mercado_libre',
   Falabella = 'falabella',
+  WooCommerce = 'woocommerce',
   Amazon = 'amazon',
   Walmart = 'walmart',
 }

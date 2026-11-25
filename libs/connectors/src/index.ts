@@ -83,3 +83,14 @@ export * from './falabella/falabella-countries.js';
 export * from './falabella/falabella-settings.js';
 export { FalabellaCountry, FalabellaCredentialField } from './falabella/falabella.enums.js';
 export { FALABELLA_CREDENTIALS_GUIDE_URL } from './falabella/falabella.constants.js';
+export * from './woocommerce/woocommerce.connector.js';
+export * from './woocommerce/woocommerce-connector.module.js';
+export * from './woocommerce/woocommerce-settings.js';
+export * from './woocommerce/woocommerce.enums.js';
+export {
+  WOOCOMMERCE_CONTENT_LIMITS,
+  WOOCOMMERCE_CREDENTIALS_GUIDE_URL,
+  WOOCOMMERCE_DISPLAY_NAME,
+} from './woocommerce/woocommerce.constants.js';
+export * from './woocommerce/orders/woocommerce-order-source.js';
+export * from './woocommerce/webhooks/woocommerce-webhook-parser.js';

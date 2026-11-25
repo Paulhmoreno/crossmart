@@ -9,6 +9,13 @@ export interface ListedFile extends StoredFile {
   byteSize: number;
 }
 
+/** A file read back from Crossmart's own storage for binary channel uploads. */
+export interface ReadStoredFile {
+  bytes: Buffer;
+  contentType: string;
+  fileName: string;
+}
+
 /**
  * Where uploaded files live. Implementations: `LocalFileStorage` now, S3-compatible
  * object storage (S3, R2) for the cloud.
@@ -22,4 +29,7 @@ export abstract class FileStorage {
 
   /** Every file under the folder `prefix`, nested ones included; none when it is empty. */
   abstract list(prefix: string): AsyncIterable<ListedFile>;
+
+  /** Reads a file back when `url` belongs to this storage's public base URL; null otherwise. */
+  readByUrl?(url: string): Promise<ReadStoredFile | null>;
 }

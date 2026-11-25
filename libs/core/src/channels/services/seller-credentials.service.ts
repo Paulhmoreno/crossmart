@@ -41,6 +41,33 @@ export class SellerCredentialsService {
   ) {}
 
   /**
+   * Tests pasted credentials with a live read-only call without persisting anything.
+   * Returns the verified account profile or throws 400 / 422 / 503.
+   */
+  async test(
+    workspaceId: string,
+    request: SellerCredentialsRequest,
+  ): Promise<{
+    externalAccountId: string;
+    displayName: string;
+    settings: import('@crossmart/connectors').ChannelSettings;
+  }> {
+    const connector = this.connectors.requireReady(request.channel);
+    const values = parseSellerCredentialValues(connector.credentialFields, request.credentials);
+    await this.quota.assertNotSandbox(workspaceId);
+    try {
+      const verified = await connector.verifyCredentials(values);
+      return {
+        externalAccountId: verified.externalAccountId,
+        displayName: verified.profile.displayName,
+        settings: verified.profile.settings,
+      };
+    } catch (error) {
+      throw toHttpError(error);
+    }
+  }
+
+  /**
    * Stores the account, or the new keys of an account connected before. Throws 400 for values
    * the connector does not accept, 422 when the channel refuses them, 503 when it is down, 402
    * when the plan has no room.

@@ -50,11 +50,12 @@ export class ProductMatcher {
   async match(context: ImportPageContext, products: ExternalProduct[]): Promise<ProductMatch[]> {
     const index = await this.loadIndex(context, products);
     const claimed = new Set<string>();
-    return products.map((product) => this.classify(product, index, claimed));
+    const matchByHandle = context.matchByHandle ?? true;
+    return products.map((product) => this.classify(product, index, claimed, matchByHandle));
   }
 
   private async loadIndex(
-    { workspaceId, connectionId }: ImportPageContext,
+    { workspaceId, connectionId, matchByHandle = true }: ImportPageContext,
     products: ExternalProduct[],
   ): Promise<MatchIndex> {
     const listings = await this.listings.findManyByExternalIds(
@@ -66,10 +67,12 @@ export class ProductMatcher {
         workspaceId,
         listings.map((listing) => listing.productId),
       ),
-      this.catalog.findByHandles(
-        workspaceId,
-        products.map((product) => product.handle),
-      ),
+      matchByHandle
+        ? this.catalog.findByHandles(
+            workspaceId,
+            products.map((product) => product.handle),
+          )
+        : Promise.resolve([]),
       this.catalog.findBySkus(workspaceId, products.flatMap(skusOf)),
     ]);
     const listed = await this.listings.findExternalIdsByProduct(
@@ -97,6 +100,7 @@ export class ProductMatcher {
     product: ExternalProduct,
     index: MatchIndex,
     claimed: Set<string>,
+    matchByHandle: boolean,
   ): ProductMatch {
     const listing = index.listingByExternalId.get(product.externalId);
     const linkedTarget = listing ? index.productById.get(listing.productId) : undefined;
@@ -109,7 +113,7 @@ export class ProductMatcher {
         knownVariants: listing.knownVariants,
       };
     }
-    const { kind, target } = this.findCandidate(product, index);
+    const { kind, target } = this.findCandidate(product, index, matchByHandle);
     if (!target) {
       return { product, kind };
     }
@@ -123,10 +127,13 @@ export class ProductMatcher {
   private findCandidate(
     product: ExternalProduct,
     index: MatchIndex,
+    matchByHandle: boolean,
   ): { kind: ProductMatchKind; target?: CatalogMatchCandidate } {
-    const byHandle = index.productByHandle.get(product.handle);
-    if (byHandle) {
-      return { kind: ProductMatchKind.Handle, target: byHandle };
+    if (matchByHandle) {
+      const byHandle = index.productByHandle.get(product.handle);
+      if (byHandle) {
+        return { kind: ProductMatchKind.Handle, target: byHandle };
+      }
     }
     const sku = skusOf(product).find((candidate) => index.productBySku.has(candidate));
     const bySku = sku === undefined ? undefined : index.productBySku.get(sku);

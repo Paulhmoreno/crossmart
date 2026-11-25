@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { ChannelType } from '@crossmart/connectors';
 import { ImportJobStatus } from '@crossmart/database';
 import type { ChannelImportJobRef, ChannelImportRunOptions } from '../entities/channel-import.js';
 import {
@@ -48,12 +49,13 @@ export class ChannelImportRunner {
 
   private async importPages(job: ChannelImportRunRecord, connectionId: string): Promise<void> {
     const { workspaceId } = job;
-    const { session, source } = await this.catalogs.open(workspaceId, connectionId);
+    const { channel, session, source } = await this.catalogs.open(workspaceId, connectionId);
     const actor = toImportActor(job);
+    const matchByHandle = channel !== ChannelType.WooCommerce;
     let cursor = job.cursor;
     do {
       const page = await source.fetchProducts(session, cursor);
-      const context = { workspaceId, connectionId, actor, syncedAt: new Date() };
+      const context = { workspaceId, connectionId, actor, syncedAt: new Date(), matchByHandle };
       const outcome = await this.pages.importPage(context, page.items);
       await this.jobs.recordPage(workspaceId, job.id, {
         nextCursor: page.nextCursor,

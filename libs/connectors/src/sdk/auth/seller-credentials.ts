@@ -10,6 +10,8 @@ export interface SellerCredentialField {
   /** A secret (an API key): sealed with the credentials, never logged, stored or shown again. */
   secret: boolean;
   maxLength: number;
+  /** True when the merchant may omit this field (e.g. optional WordPress media credentials). */
+  optional?: boolean;
   /** The only values it accepts, for a field picked from a list (a country). */
   options?: readonly string[];
 }

@@ -9,6 +9,7 @@ import {
   isGoogleMerchantSettings,
   isMercadoLibreSettings,
   isShopifySettings,
+  isWooCommerceSettings,
 } from '@crossmart/connectors';
 import type { ChannelConnectionView } from '@crossmart/core';
 import { ChannelConnectionStatus } from '@crossmart/database';
@@ -25,10 +26,11 @@ import { FalabellaSettingsDto } from './falabella-settings.dto.js';
 import { GoogleMerchantSettingsDto } from './google-merchant-settings.dto.js';
 import { MercadoLibreSettingsDto } from './mercadolibre-settings.dto.js';
 import { PublishReadinessDto } from './publish-readiness.dto.js';
+import { WooCommerceSettingsDto } from './woocommerce-settings.dto.js';
 
 type AccountDtos = Pick<
   ChannelConnectionDto,
-  'shopify' | 'ebay' | 'googleMerchant' | 'etsy' | 'mercadoLibre' | 'falabella'
+  'shopify' | 'ebay' | 'googleMerchant' | 'etsy' | 'mercadoLibre' | 'falabella' | 'woocommerce'
 >;
 
 const NO_ACCOUNT: AccountDtos = {
@@ -38,6 +40,7 @@ const NO_ACCOUNT: AccountDtos = {
   etsy: null,
   mercadoLibre: null,
   falabella: null,
+  woocommerce: null,
 };
 
 /** The one channel field a connection's account details go under. */
@@ -52,6 +55,9 @@ function accountDto(account: ChannelSettings): Partial<AccountDtos> {
     return { mercadoLibre: MercadoLibreSettingsDto.from(account) };
   }
   if (isFalabellaSettings(account)) return { falabella: FalabellaSettingsDto.from(account) };
+  if (isWooCommerceSettings(account)) {
+    return { woocommerce: WooCommerceSettingsDto.from(account) };
+  }
   return {};
 }
 
@@ -132,6 +138,13 @@ export class ChannelConnectionDto {
     description: 'The Falabella account’s country, seller and user, for Falabella connections',
   })
   falabella: FalabellaSettingsDto | null;
+
+  @ApiProperty({
+    type: WooCommerceSettingsDto,
+    nullable: true,
+    description: 'The WooCommerce store details and media readiness, for WooCommerce connections',
+  })
+  woocommerce: WooCommerceSettingsDto | null;
 
   @ApiProperty({
     type: ProductSelectionRuleDto,

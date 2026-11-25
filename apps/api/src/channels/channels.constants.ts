@@ -78,9 +78,11 @@ export const PRODUCT_URL_TEMPLATE_MAX_LENGTH = 2_000;
  */
 export const OAUTH_NONCE_COOKIE = 'crossmart_oauth_nonce';
 export const HTTPS_PROTOCOL = 'https:';
-/** Connecting a channel with credentials the merchant pastes (Falabella), under the connections. */
+/** Connecting a channel with credentials the merchant pastes (Falabella, WooCommerce). */
 export const CREDENTIALS_PATH = 'credentials';
+export const CREDENTIALS_TEST_PATH = 'credentials/test';
 export const FALABELLA_COUNTRY_SCHEMA_NAME = 'FalabellaCountry';
+export const WOOCOMMERCE_PUBLISH_STATUS_SCHEMA_NAME = 'WooCommercePublishStatus';
 export const CREDENTIALS_REJECTED_RESPONSE_DESCRIPTION =
   'The channel refused the credentials, or the account they name. `message` is its explanation.';
 export const CHANNEL_UNAVAILABLE_RESPONSE_DESCRIPTION = 'The channel is not responding';

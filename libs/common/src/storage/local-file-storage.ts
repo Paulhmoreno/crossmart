@@ -1,10 +1,22 @@
 import type { Dirent } from 'node:fs';
-import { mkdir, readdir, rm, stat, writeFile } from 'node:fs/promises';
-import { dirname, join, relative, resolve, sep } from 'node:path';
-import { FileStorage, type ListedFile, type StoredFile } from './file-storage.js';
+import { mkdir, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { basename, dirname, extname, join, relative, resolve, sep } from 'node:path';
+import {
+  FileStorage,
+  type ListedFile,
+  type ReadStoredFile,
+  type StoredFile,
+} from './file-storage.js';
 
 const URL_PATH_SEPARATOR = '/';
 const MISSING_FILE = 'ENOENT';
+const CONTENT_TYPES_BY_EXT: Readonly<Record<string, string>> = {
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.png': 'image/png',
+  '.webp': 'image/webp',
+  '.gif': 'image/gif',
+};
 
 /** Keeps files on local disk. The API serves them at `publicBaseUrl` (see `mountMediaFiles`). */
 export class LocalFileStorage extends FileStorage {
@@ -37,6 +49,26 @@ export class LocalFileStorage extends FileStorage {
   /** Walks the folder one directory at a time, so a large one is never held in memory. */
   async *list(prefix: string): AsyncIterable<ListedFile> {
     yield* this.filesIn(this.pathFor(prefix));
+  }
+
+  override async readByUrl(url: string): Promise<ReadStoredFile | null> {
+    const prefix = `${this.publicBaseUrl.replace(/\/+$/, '')}${URL_PATH_SEPARATOR}`;
+    if (!url.startsWith(prefix)) return null;
+    const key = decodeURIComponent(url.slice(prefix.length));
+    if (!key) return null;
+    const filePath = this.pathFor(key);
+    try {
+      const bytes = await readFile(filePath);
+      const ext = extname(filePath).toLowerCase();
+      return {
+        bytes,
+        contentType: CONTENT_TYPES_BY_EXT[ext] ?? 'application/octet-stream',
+        fileName: basename(filePath),
+      };
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === MISSING_FILE) return null;
+      throw error;
+    }
   }
 
   private async *filesIn(folder: string): AsyncIterable<ListedFile> {

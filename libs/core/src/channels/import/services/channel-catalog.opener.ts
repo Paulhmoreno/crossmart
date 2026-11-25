@@ -23,6 +23,7 @@ import { CONNECTION_NOT_CONNECTED, IMPORT_NOT_SUPPORTED } from '../channel-impor
 
 /** A connection's catalog, ready to read page by page. */
 export interface OpenCatalog {
+  channel: ChannelType;
   session: ChannelSession;
   source: CatalogSource;
 }
@@ -61,7 +62,11 @@ export class ChannelCatalogOpener {
   async open(workspaceId: string, connectionId: string): Promise<OpenCatalog> {
     const connection = await this.require(workspaceId, connectionId);
     const source = this.catalogSourceOf(connection.channel);
-    return { session: await this.sessions.open(workspaceId, connectionId), source };
+    return {
+      channel: source.channel,
+      session: await this.sessions.open(workspaceId, connectionId),
+      source,
+    };
   }
 
   private async require(

@@ -100,4 +100,22 @@ describe('ProductMatcher', () => {
       ProductMatchKind.Taken,
     ]);
   });
+
+  it('skips handle matching when matchByHandle is false (strict remote-ID / SKU linking)', async () => {
+    const { matcher, catalog } = setup({
+      byHandle: [candidate('p-handle', 'same-slug')],
+      bySku: [candidate('p-sku', 'different-slug', 'EXACT-SKU')],
+    });
+
+    const matches = await matcher.match({ ...CONTEXT, matchByHandle: false }, [
+      externalProduct('same-slug'),
+      externalProduct('other-slug', ['EXACT-SKU']),
+    ]);
+
+    expect(catalog.findByHandles).not.toHaveBeenCalled();
+    expect(matches.map((match) => [match.kind, match.target?.id])).toEqual([
+      [ProductMatchKind.New, undefined],
+      [ProductMatchKind.Sku, 'p-sku'],
+    ]);
+  });
 });

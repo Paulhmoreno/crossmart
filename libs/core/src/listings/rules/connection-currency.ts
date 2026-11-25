@@ -2,9 +2,11 @@ import {
   type ChannelSettings,
   isEbaySettings,
   isEtsySettings,
+  isFalabellaSettings,
   isGoogleMerchantSettings,
   isMercadoLibreSettings,
   isShopifySettings,
+  isWooCommerceSettings,
 } from '@crossmart/connectors';
 import { DEFAULT_CURRENCY_CODE } from '../../channels/channels.constants.js';
 import type { ConnectionSettings } from '../../channels/entities/connection-settings.js';
@@ -16,7 +18,9 @@ function accountCurrency(account: ChannelSettings): string | null {
     isEbaySettings(account) ||
     isGoogleMerchantSettings(account) ||
     isEtsySettings(account) ||
-    isMercadoLibreSettings(account)
+    isMercadoLibreSettings(account) ||
+    isFalabellaSettings(account) ||
+    isWooCommerceSettings(account)
   ) {
     return account.currencyCode;
   }
