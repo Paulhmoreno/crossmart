@@ -8,14 +8,15 @@ import { AiProvider } from './providers/ai-provider.js';
 import { AiUsageRepository } from './repositories/ai-usage.repository.js';
 import { PlatformAiUsageRepository } from './repositories/platform-ai-usage.repository.js';
 import { AiConfigService } from './services/ai-config.service.js';
+import { AiConnectionsService } from './services/ai-connections.service.js';
 import { AiCredentialsVault } from './services/ai-credentials.vault.js';
 import { AiGateway } from './services/ai-gateway.service.js';
 import { AiUsageService } from './services/ai-usage.service.js';
 
 /**
- * The AI layer: the `AiProvider` abstraction (Anthropic and OpenAI-compatible), per-workspace
- * encrypted provider configuration, metering of every call, and `AiGateway`, through which
- * agents call the model.
+ * The AI layer: the `AiProvider` abstraction (OpenAI, Anthropic, Gemini, OpenAI-compatible,
+ * and Anthropic-compatible), multi-connection encrypted configuration, metering of every call,
+ * and `AiGateway`, through which agents call the model.
  */
 @Module({
   imports: [EntitlementsModule, CredentialsModule, ActivityModule],
@@ -24,11 +25,12 @@ import { AiUsageService } from './services/ai-usage.service.js';
     { provide: AiProvider, useClass: AnthropicAiProvider },
     AiCredentialsVault,
     AiConfigService,
+    AiConnectionsService,
     AiUsageRepository,
     PlatformAiUsageRepository,
     AiUsageService,
     AiGateway,
   ],
-  exports: [AiGateway, AiUsageService, AiConfigService],
+  exports: [AiGateway, AiUsageService, AiConfigService, AiConnectionsService],
 })
 export class AiModule {}

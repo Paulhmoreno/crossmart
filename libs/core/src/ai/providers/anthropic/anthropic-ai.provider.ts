@@ -56,18 +56,19 @@ export class AnthropicAiProvider extends AiProvider {
     this.messages = anthropicApiKey ? clients.create(anthropicApiKey) : null;
   }
 
-  /** Builds a per-workspace Anthropic provider using decrypted workspace credentials. */
+  /** Builds a per-workspace Anthropic or Anthropic-compatible provider using decrypted credentials. */
   static fromCredentials(
     clients: AnthropicClientFactory,
     apiKey: string,
     model: string,
+    options?: { baseUrl?: string | null; providerName?: AiProviderName },
   ): AnthropicAiProvider {
     const instance = Object.create(AnthropicAiProvider.prototype) as AnthropicAiProvider;
     Object.assign(instance, {
-      name: AiProviderName.Anthropic,
+      name: options?.providerName ?? AiProviderName.Anthropic,
       model: model.trim(),
       logger: new Logger(AnthropicAiProvider.name),
-      messages: clients.create(apiKey),
+      messages: clients.create(apiKey, options?.baseUrl),
     });
     return instance;
   }

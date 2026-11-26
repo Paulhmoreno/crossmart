@@ -44,6 +44,10 @@ model User {
   odooConnections          OdooConnection[]
   odooSyncRuns             OdooSyncRun[]
   updatedAiConfigs         WorkspaceAiConfig[]       @relation("WorkspaceAiConfigUpdatedBy")
+  updatedAiConnections     AiConnection[]            @relation("AiConnectionUpdatedBy")
+  updatedChatwootConns     ChatwootConnection[]      @relation("ChatwootConnectionUpdatedBy")
+  updatedAgentConfigs      WorkspaceAgentConfig[]    @relation("WorkspaceAgentConfigUpdatedBy")
+  salesConversations       SalesConversation[]
   createdAt                DateTime                  @default(now()) @map("created_at")
   updatedAt                DateTime                  @updatedAt @map("updated_at")
 
@@ -351,6 +355,10 @@ model Workspace {
   odooConnection           OdooConnection?
   odooSyncRuns             OdooSyncRun[]
   aiConfig                 WorkspaceAiConfig?
+  aiConnections            AiConnection[]
+  chatwootConnections      ChatwootConnection[]
+  agentConfigs             WorkspaceAgentConfig[]
+  salesConversations       SalesConversation[]
   createdAt                DateTime                  @default(now()) @map("created_at")
   updatedAt                DateTime                  @updatedAt @map("updated_at")
 
@@ -1423,6 +1431,10 @@ model AiUsage {
   /// An `AiProviderName` value.
   provider     String
   model        String
+  /// Optional internal agent key (`crossmart` | `sales`) when the call belongs to an agent.
+  agentKey     String?   @map("agent_key")
+  /// Optional `AiConnection.id` used to serve this call.
+  connectionId String?   @map("connection_id") @db.Uuid
   inputTokens  Int       @map("input_tokens")
   outputTokens Int       @map("output_tokens")
   createdAt    DateTime  @default(now()) @map("created_at")
@@ -1966,4 +1978,158 @@ model ChannelAppConfig {
   updatedAt             DateTime @updatedAt @map("updated_at")
 
   @@map("channel_app_configs")
+}
+
+// ─── Multi-Provider AI Connections, Chatwoot & Commercial Agents ──────────────
+
+/// Per-workspace AI provider connection (supports multiple simultaneous connections per family).
+model AiConnection {
+  id                String                 @id @default(uuid(7)) @db.Uuid
+  workspaceId       String                 @map("workspace_id") @db.Uuid
+  workspace         Workspace              @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  name              String
+  /// `openai` | `anthropic` | `gemini` | `openai_compatible` | `anthropic_compatible`
+  provider          String
+  baseUrl           String?                @map("base_url")
+  /// Sealed JSON `{ apiKey }` encrypted with the workspace data key.
+  sealedCredentials String?                @map("sealed_credentials")
+  defaultModel      String                 @map("default_model")
+  /// Discovered available model identifiers (`string[]`).
+  availableModels   Json                   @default("[]") @map("available_models")
+  /// Verified provider/model capabilities JSON.
+  capabilities      Json                   @default("{}")
+  status            AiConfigStatus         @default(CONNECTED)
+  isDefault         Boolean                @default(false) @map("is_default")
+  lastError         String?                @map("last_error")
+  lastTestedAt      DateTime?              @map("last_tested_at")
+  updatedById       String?                @map("updated_by_id") @db.Uuid
+  updatedBy         User?                  @relation("AiConnectionUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+  agentConfigs      WorkspaceAgentConfig[]
+  createdAt         DateTime               @default(now()) @map("created_at")
+  updatedAt         DateTime               @updatedAt @map("updated_at")
+
+  @@index([workspaceId])
+  @@map("ai_connections")
+}
+
+enum ChatwootConnectionStatus {
+  CONNECTED
+  ERROR
+  DISABLED
+
+  @@map("chatwoot_connection_status")
+}
+
+/// Per-workspace Chatwoot communication connector (self-hosted or compatible).
+model ChatwootConnection {
+  id                String                   @id @default(uuid(7)) @db.Uuid
+  workspaceId       String                   @map("workspace_id") @db.Uuid
+  workspace         Workspace                @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  name              String
+  baseUrl           String                   @map("base_url")
+  accountId         Int?                     @map("account_id")
+  accountName       String?                  @map("account_name")
+  /// Sealed JSON `{ apiAccessToken, agentBotToken?, webhookSecret? }` encrypted with workspace data key.
+  sealedCredentials String                   @map("sealed_credentials")
+  /// Real inboxes discovered from Chatwoot (`{ id, name, channelType }[]`).
+  inboxes           Json                     @default("[]")
+  status            ChatwootConnectionStatus @default(CONNECTED)
+  lastError         String?                  @map("last_error")
+  lastTestedAt      DateTime?                @map("last_tested_at")
+  updatedById       String?                  @map("updated_by_id") @db.Uuid
+  updatedBy         User?                    @relation("ChatwootConnectionUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+  agentConfigs      WorkspaceAgentConfig[]
+  webhookEvents     ChatwootWebhookEvent[]
+  createdAt         DateTime                 @default(now()) @map("created_at")
+  updatedAt         DateTime                 @updatedAt @map("updated_at")
+
+  @@index([workspaceId])
+  @@map("chatwoot_connections")
+}
+
+/// Deduplication & audit log for incoming Chatwoot webhook events.
+model ChatwootWebhookEvent {
+  id               String             @id @default(uuid(7)) @db.Uuid
+  workspaceId      String             @map("workspace_id") @db.Uuid
+  connectionId     String             @map("connection_id") @db.Uuid
+  connection       ChatwootConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+  externalEventKey String             @map("external_event_key")
+  conversationId   Int                @map("conversation_id")
+  inboxId          Int?               @map("inbox_id")
+  eventType        String             @map("event_type")
+  outcome          String             @default("received")
+  detail           String?
+  createdAt        DateTime           @default(now()) @map("created_at")
+
+  @@unique([connectionId, externalEventKey])
+  @@index([workspaceId, conversationId, createdAt(sort: Desc)])
+  @@map("chatwoot_webhook_events")
+}
+
+enum SalesAgentMode {
+  DISABLED
+  SUPERVISED
+  AUTOMATIC
+
+  @@map("sales_agent_mode")
+}
+
+/// Single source of truth for per-agent AI assignment and Sales Agent commercial configuration.
+model WorkspaceAgentConfig {
+  id                   String              @id @default(uuid(7)) @db.Uuid
+  workspaceId          String              @map("workspace_id") @db.Uuid
+  workspace            Workspace           @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  /// `crossmart` | `sales`
+  agentKey             String              @map("agent_key")
+  aiConnectionId       String?             @map("ai_connection_id") @db.Uuid
+  aiConnection         AiConnection?       @relation(fields: [aiConnectionId], references: [id], onDelete: Restrict)
+  model                String?
+  chatwootConnectionId String?             @map("chatwoot_connection_id") @db.Uuid
+  chatwootConnection   ChatwootConnection? @relation(fields: [chatwootConnectionId], references: [id], onDelete: SetNull)
+  authorizedInboxIds   Json                @default("[]") @map("authorized_inbox_ids")
+  commercialPolicy     Json                @default("{}") @map("commercial_policy")
+  salesMode            SalesAgentMode      @default(DISABLED) @map("sales_mode")
+  updatedById          String?             @map("updated_by_id") @db.Uuid
+  updatedBy            User?               @relation("WorkspaceAgentConfigUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+  createdAt            DateTime            @default(now()) @map("created_at")
+  updatedAt            DateTime            @updatedAt @map("updated_at")
+
+  @@unique([workspaceId, agentKey])
+  @@index([aiConnectionId])
+  @@map("workspace_agent_configs")
+}
+
+/// Isolated conversations for the Sales Agent (simulator and Chatwoot trace, separate from Crossmart Agent).
+model SalesConversation {
+  id               String         @id @default(uuid(7)) @db.Uuid
+  workspaceId      String         @map("workspace_id") @db.Uuid
+  workspace        Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  userId           String?        @map("user_id") @db.Uuid
+  user             User?          @relation(fields: [userId], references: [id], onDelete: SetNull)
+  /// `simulator` | `chatwoot`
+  source           String         @default("simulator")
+  externalRef      String?        @map("external_ref")
+  title            String
+  handoffRequested Boolean        @default(false) @map("handoff_requested")
+  handoffReason    String?        @map("handoff_reason")
+  messages         SalesMessage[]
+  createdAt        DateTime       @default(now()) @map("created_at")
+  updatedAt        DateTime       @updatedAt @map("updated_at")
+
+  @@index([workspaceId, updatedAt(sort: Desc)])
+  @@map("sales_conversations")
+}
+
+model SalesMessage {
+  id             String            @id @default(uuid(7)) @db.Uuid
+  conversationId String            @map("conversation_id") @db.Uuid
+  conversation   SalesConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  /// `buyer` | `assistant` | `private_draft` | `system`
+  role           String
+  text           String
+  metadata       Json              @default("{}")
+  createdAt      DateTime          @default(now()) @map("created_at")
+
+  @@index([conversationId, createdAt])
+  @@map("sales_messages")
 }

@@ -11,4 +11,6 @@ export enum AiFeature {
   Ask = 'ask',
   /** Agent Worker: one model call of its tool loop, in a workspace's chat (ADR 0026). */
   AgentWorker = 'agent_worker',
+  /** Sales Agent: buyer-facing commercial conversation turn (simulator or Chatwoot). */
+  SalesAgent = 'sales_agent',
 }

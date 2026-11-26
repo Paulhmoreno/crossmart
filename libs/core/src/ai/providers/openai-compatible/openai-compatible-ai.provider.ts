@@ -52,6 +52,7 @@ export interface OpenAiCompatibleOptions {
   baseUrl: string;
   apiKey: string | null;
   model: string;
+  providerName?: AiProviderName;
   fetchImpl?: typeof fetch;
   timeoutMs?: number;
 }
@@ -270,7 +271,7 @@ function extractErrorMessage(bodyText: string): string {
  * instances using one native adapter without vendor lock-in.
  */
 export class OpenAiCompatibleAiProvider extends AiProvider {
-  readonly name = AiProviderName.OpenAiCompatible;
+  readonly name: AiProviderName;
   readonly model: string;
   readonly baseUrl: string;
   readonly isPrivateEndpoint: boolean;
@@ -282,6 +283,7 @@ export class OpenAiCompatibleAiProvider extends AiProvider {
   constructor(options: OpenAiCompatibleOptions) {
     super();
     const normalized = normalizeOpenAiBaseUrl(options.baseUrl);
+    this.name = options.providerName ?? AiProviderName.OpenAiCompatible;
     this.baseUrl = normalized.baseUrl;
     this.isPrivateEndpoint = normalized.isPrivate;
     this.apiKey = options.apiKey?.trim() || null;

@@ -73,8 +73,10 @@ export interface AiConversationReply {
   usage: AiTokenUsage;
 }
 
-/** Who a conversation call is for and what it does, for metering. */
+/** Who a conversation call is for and what it does, for metering and per-agent model resolution. */
 export interface AiConversationContext {
   workspaceId: string;
   feature: AiFeature;
+  agentKey?: string | null;
+  connectionId?: string | null;
 }

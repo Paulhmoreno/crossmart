@@ -22,6 +22,7 @@ import { AiNotConfiguredError, AiOutputRejectedError } from '../errors/ai.errors
 import { AiProvider } from '../providers/ai-provider.js';
 import { parseStructuredOutput } from '../rules/structured-output.js';
 import { AiConfigService } from './ai-config.service.js';
+import { AiConnectionsService } from './ai-connections.service.js';
 import { AiUsageService } from './ai-usage.service.js';
 
 const ONE_CALL = 1;
@@ -40,6 +41,7 @@ export class AiGateway {
     private readonly usage: AiUsageService,
     private readonly entitlements: EntitlementService,
     @Optional() private readonly configs?: AiConfigService,
+    @Optional() private readonly connections?: AiConnectionsService,
   ) {}
 
   status(): AiStatus {
@@ -50,7 +52,19 @@ export class AiGateway {
     };
   }
 
-  async statusForWorkspace(workspaceId: string): Promise<AiStatus> {
+  async statusForWorkspace(workspaceId: string, agentKey?: string): Promise<AiStatus> {
+    if (this.connections) {
+      try {
+        const resolved = await this.connections.resolveForCall(workspaceId, { agentKey });
+        return {
+          configured: resolved.configured,
+          provider: resolved.provider.name,
+          model: resolved.provider.model,
+        };
+      } catch {
+        return { configured: false, provider: this.provider.name, model: this.provider.model };
+      }
+    }
     if (!this.configs) return this.status();
     const view = await this.configs.getConfig(workspaceId);
     return {
@@ -67,7 +81,12 @@ export class AiGateway {
     }
   }
 
-  async assertConfiguredForWorkspace(workspaceId: string): Promise<void> {
+  async assertConfiguredForWorkspace(workspaceId: string, agentKey?: string): Promise<void> {
+    if (this.connections) {
+      const resolved = await this.connections.resolveForCall(workspaceId, { agentKey });
+      if (!resolved.configured) throw new AiNotConfiguredError();
+      return;
+    }
     if (!this.configs) {
       this.assertConfigured();
       return;
@@ -97,7 +116,7 @@ export class AiGateway {
     context: AiCallContext,
     request: AiStructuredRequest<Output>,
   ): Promise<AiGeneration<Output>> {
-    const resolved = await this.resolveProvider(context.workspaceId);
+    const resolved = await this.resolveProvider(context);
     await this.assertCredits(context.workspaceId);
     const effectiveRequest = resolved.forceModel
       ? { ...request, model: resolved.provider.model }
@@ -105,26 +124,24 @@ export class AiGateway {
     let completion: AiCompletion;
     try {
       completion = await resolved.provider.complete(effectiveRequest);
-      await this.configs?.recordCallOutcome(context.workspaceId, null);
+      await this.recordOutcome(context.workspaceId, resolved.connectionId, null);
     } catch (error) {
-      await this.configs?.recordCallOutcome(context.workspaceId, error);
+      await this.recordOutcome(context.workspaceId, resolved.connectionId, error);
       throw error;
     }
-    await this.meter(context, resolved.provider.name, completion);
+    await this.meter(context, resolved.provider.name, resolved.connectionId, completion);
     return this.validate(context.feature, completion, effectiveRequest);
   }
 
   /**
-   * One call of a conversation with tools (Agent Worker), streamed. Like `generate` it needs a
-   * credit left and is metered, one credit per call; the reply's tool uses are the caller's to
-   * validate and run, since no schema can vouch for what a model asks for.
+   * One call of a conversation with tools (Agent Worker / Sales Agent), streamed.
    */
   async converse(
     context: AiConversationContext,
     request: AiConversationRequest,
     listener: AiConversationListener,
   ): Promise<AiConversationReply> {
-    const resolved = await this.resolveProvider(context.workspaceId);
+    const resolved = await this.resolveProvider(context);
     await this.assertCredits(context.workspaceId);
     const effectiveRequest = resolved.forceModel
       ? { ...request, model: resolved.provider.model }
@@ -132,9 +149,9 @@ export class AiGateway {
     let reply: AiConversationReply;
     try {
       reply = await resolved.provider.converse(effectiveRequest, listener);
-      await this.configs?.recordCallOutcome(context.workspaceId, null);
+      await this.recordOutcome(context.workspaceId, resolved.connectionId, null);
     } catch (error) {
-      await this.configs?.recordCallOutcome(context.workspaceId, error);
+      await this.recordOutcome(context.workspaceId, resolved.connectionId, error);
       throw error;
     }
     await this.usage.record({
@@ -142,6 +159,8 @@ export class AiGateway {
       feature: context.feature,
       provider: resolved.provider.name,
       model: reply.model,
+      ...(context.agentKey ? { agentKey: context.agentKey } : {}),
+      ...(resolved.connectionId ? { connectionId: resolved.connectionId } : {}),
       ...reply.usage,
     });
     return reply;
@@ -167,19 +186,48 @@ export class AiGateway {
     return this.validate(context.feature, completion, request);
   }
 
-  private async resolveProvider(workspaceId: string): Promise<{
+  private async resolveProvider(context: {
+    workspaceId: string;
+    agentKey?: string | null;
+    connectionId?: string | null;
+  }): Promise<{
     provider: AiProvider;
+    connectionId: string | null;
     forceModel: boolean;
   }> {
+    if (this.connections) {
+      const resolved = await this.connections.resolveForCall(context.workspaceId, {
+        agentKey: context.agentKey,
+        connectionId: context.connectionId,
+      });
+      if (!resolved.configured) throw new AiNotConfiguredError();
+      return {
+        provider: resolved.provider,
+        connectionId: resolved.connectionId,
+        forceModel: resolved.forceModel,
+      };
+    }
     if (!this.configs) {
       this.assertConfigured();
-      return { provider: this.provider, forceModel: false };
+      return { provider: this.provider, connectionId: null, forceModel: false };
     }
-    const resolved = await this.configs.resolveForWorkspace(workspaceId);
+    const resolved = await this.configs.resolveForWorkspace(context.workspaceId);
     if (!resolved.configured) {
       throw new AiNotConfiguredError();
     }
-    return { provider: resolved.provider, forceModel: resolved.forceModel };
+    return { provider: resolved.provider, connectionId: null, forceModel: resolved.forceModel };
+  }
+
+  private async recordOutcome(
+    workspaceId: string,
+    connectionId: string | null,
+    error: unknown,
+  ): Promise<void> {
+    if (connectionId && this.connections) {
+      await this.connections.recordOutcome(connectionId, error);
+      return;
+    }
+    await this.configs?.recordCallOutcome(workspaceId, error);
   }
 
   private validate<Output>(
@@ -200,6 +248,7 @@ export class AiGateway {
   private meter(
     context: AiCallContext,
     provider: AiProvider['name'],
+    connectionId: string | null,
     completion: AiCompletion,
   ): Promise<void> {
     return this.usage.record({
@@ -207,6 +256,8 @@ export class AiGateway {
       feature: context.feature,
       provider,
       model: completion.model,
+      ...(context.agentKey ? { agentKey: context.agentKey } : {}),
+      ...(connectionId ? { connectionId } : {}),
       ...completion.usage,
     });
   }

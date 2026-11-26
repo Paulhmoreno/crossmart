@@ -20,12 +20,13 @@ export interface AnthropicMessages {
   stream(params: BetaMessageStreamParams, options: AnthropicStreamOptions): Promise<BetaMessage>;
 }
 
-/** Builds the SDK client. The key is passed in, never read from the environment here. */
+/** Builds the SDK client. The key (and optional baseURL for Anthropic-compatible servers) is passed in. */
 @Injectable()
 export class AnthropicClientFactory {
-  create(apiKey: string): AnthropicMessages {
+  create(apiKey: string, baseUrl?: string | null): AnthropicMessages {
     const client = new Anthropic({
       apiKey,
+      ...(baseUrl ? { baseURL: baseUrl } : {}),
       timeout: ANTHROPIC_TIMEOUT_MS,
       maxRetries: ANTHROPIC_MAX_RETRIES,
     });

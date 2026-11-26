@@ -31,10 +31,12 @@ export interface AiCompletion {
   usage: AiTokenUsage;
 }
 
-/** Who a call is for and what it does, for metering. */
+/** Who a call is for and what it does, for metering and per-agent model resolution. */
 export interface AiCallContext {
   workspaceId: string;
   feature: AiFeature;
+  agentKey?: string | null;
+  connectionId?: string | null;
 }
 
 /** A call Crossmart pays for itself, outside any workspace, for metering. */

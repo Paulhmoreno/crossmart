@@ -91,7 +91,7 @@ export class AgentWorkerLoop {
   private async callModel(run: AgentWorkerRun): Promise<AiConversationReply> {
     const history = await this.store.messages.listOfConversation(run.scope.conversationId);
     const reply = await this.ai.converse(
-      { workspaceId: run.scope.workspaceId, feature: AiFeature.AgentWorker },
+      { workspaceId: run.scope.workspaceId, feature: AiFeature.AgentWorker, agentKey: 'crossmart' },
       {
         system: SYSTEM_PROMPT,
         messages: buildTranscript(history),

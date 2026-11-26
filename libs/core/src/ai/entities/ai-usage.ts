@@ -8,10 +8,15 @@ export interface AiUsageRecordInput extends AiTokenUsage {
   feature: AiFeature;
   provider: AiProviderName;
   model: string;
+  agentKey?: string | null;
+  connectionId?: string | null;
 }
 
 /** One metered call the platform pays for, outside any workspace. */
-export type AiPlatformUsageRecordInput = Omit<AiUsageRecordInput, 'workspaceId'>;
+export type AiPlatformUsageRecordInput = Omit<
+  AiUsageRecordInput,
+  'workspaceId' | 'agentKey' | 'connectionId'
+>;
 
 /** A half-open period: from its start, up to but not including its end. */
 export interface AiUsagePeriod {
