@@ -64,6 +64,14 @@ export interface OdooVariantSnapshot {
   imageBase64: string | null;
 }
 
+export interface OdooTaxDetail {
+  id: number;
+  name: string;
+  amount: number;
+  amountType: string;
+  priceInclude: boolean;
+}
+
 export interface OdooTemplateSnapshot {
   id: number;
   name: string;
@@ -77,6 +85,7 @@ export interface OdooTemplateSnapshot {
   weightKg: number | null;
   volume: number | null;
   taxNames: string[];
+  taxDetails: OdooTaxDetail[];
   taxable: boolean;
   optionNames: string[];
   mainImageBase64: string | null;
@@ -482,7 +491,7 @@ export class OdooReadOnlyClient {
         : Promise.resolve([]),
       allTaxIds.length > 0
         ? this.safeReadModel<Record<string, unknown>>(session, 'account.tax', 'read', [allTaxIds], {
-            fields: ['id', 'name'],
+            fields: ['id', 'name', 'amount', 'amount_type', 'price_include'],
           })
         : Promise.resolve([]),
       allAttrLineIds.length > 0
@@ -539,8 +548,17 @@ export class OdooReadOnlyClient {
       hasDocuments,
     );
 
-    const taxNameById = new Map<number, string>(
-      taxesRaw.map((tax) => [Number(tax.id), optionalText(tax.name) ?? String(tax.id)]),
+    const taxById = new Map<number, OdooTaxDetail>(
+      taxesRaw.map((tax) => [
+        Number(tax.id),
+        {
+          id: Number(tax.id),
+          name: optionalText(tax.name) ?? String(tax.id),
+          amount: optionalNumber(tax.amount) ?? 0,
+          amountType: optionalText(tax.amount_type) ?? 'percent',
+          priceInclude: Boolean(tax.price_include),
+        },
+      ]),
     );
     const ptavById = new Map<number, { attributeId: number; value: string }>(
       ptavRaw.map((row) => [
@@ -596,7 +614,10 @@ export class OdooReadOnlyClient {
       });
 
       const taxIds = Array.isArray(tmpl.taxes_id) ? (tmpl.taxes_id as number[]) : [];
-      const taxNames = taxIds.map((id) => taxNameById.get(id) ?? String(id));
+      const taxDetails = taxIds
+        .map((id) => taxById.get(id))
+        .filter((detail): detail is OdooTaxDetail => detail !== undefined);
+      const taxNames = taxIds.map((id) => taxById.get(id)?.name ?? String(id));
       const descriptionHtml =
         optionalText(tmpl.public_description) ??
         optionalText(tmpl.description_sale) ??
@@ -623,6 +644,7 @@ export class OdooReadOnlyClient {
         weightKg: optionalNumber(tmpl.weight),
         volume: optionalNumber(tmpl.volume),
         taxNames,
+        taxDetails,
         taxable: taxIds.length > 0,
         optionNames,
         mainImageBase64: optionalText(tmpl.image_1920),

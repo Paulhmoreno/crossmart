@@ -3,6 +3,7 @@ import type { ChannelCategory } from '../../sdk/capabilities/taxonomy-provider.j
 import type { MercadoLibreSettings } from '../mercadolibre-settings.js';
 import type { MercadoLibreCategory } from '../taxonomy/mercadolibre-taxonomy.types.js';
 import type { MercadoLibreAttributeIndex } from './mercadolibre-attributes.js';
+import type { MercadoLibreShippingDecision } from './mercadolibre-commercial.client.js';
 import type { MercadoLibrePictureInput } from './mercadolibre-item.types.js';
 
 /** Everything one listing write needs, resolved before the first write to Mercado Libre. */
@@ -12,6 +13,8 @@ export interface MercadoLibreListingPlan {
   settings: MercadoLibreSettings;
   category: ChannelCategory;
   categoryDetails?: MercadoLibreCategory;
+  listingTypeId: string;
+  shippingDecision?: MercadoLibreShippingDecision;
   pictures?: MercadoLibrePictureInput[];
   attributes: MercadoLibreAttributeIndex;
 }

@@ -14,6 +14,7 @@ Read [CLAUDE.md](CLAUDE.md), [CONTRIBUTING.md](CONTRIBUTING.md) and [IMPLEMENTAT
 - Do not commit secrets, customer data, private URLs, product data, private-source excerpts or deployment-specific configuration. Keep `.env` files local and ignored. Do not expose a test service publicly by default.
 - No production writes, real listings, real orders or destructive operations without explicit authorization for that operation. Use staging, drafts or sandbox where supported. Never bypass security or marketplace rules.
 - Update the status in IMPLEMENTATION.md only with evidence. No extra planning documents unless an upstream convention or concrete technical need requires one.
+- Commercial, tax, economic, and logistics decisions (such as tax rates, price tax inclusion, target margins, channel fees, listing types, shipping policies, price thresholds, and shipping costs) must come from persistent configuration, master data (such as the ERP), and real platform contracts — never hardcoded per country, client, account, category, or product. Reuse shared channel-neutral core logic for common economic calculations and keep channel-specific behavior inside each connector.
 
 ## Permanent interface and localization rules
 

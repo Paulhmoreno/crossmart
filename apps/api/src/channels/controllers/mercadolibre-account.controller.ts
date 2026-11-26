@@ -159,6 +159,10 @@ export class MercadoLibreAccountController {
       price: number;
       unitCost?: number | null;
       listingTypeId?: string;
+      productId?: string;
+      taxRatePercent?: number | null;
+      priceIncludesTax?: boolean | null;
+      targetMarginPercent?: number | null;
     },
   ) {
     return this.setup.previewCommercialTerms(workspaceId, connectionId, body);

@@ -123,7 +123,11 @@ export class MercadoLibreSingleItemWriter implements MercadoLibreListingWriter {
         ? await this.catalog.findExactByGtin(accessToken, settings.siteId, singleVariant.barcode)
         : null;
     return {
-      ...newItemTerms(draft, settings, category.id, categoryDetails),
+      ...newItemTerms(draft, settings, category.id, {
+        category: categoryDetails,
+        listingTypeId: plan.listingTypeId,
+        freeShipping: plan.shippingDecision?.freeShipping,
+      }),
       title: mercadoLibreTitle(draft, categoryDetails),
       pictures: plan.pictures ?? listingPictures(draft, categoryDetails),
       ...(catalogProductId ? { catalog_product_id: catalogProductId } : {}),

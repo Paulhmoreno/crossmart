@@ -102,6 +102,7 @@ function makeSnapshot(overrides: Partial<OdooTemplateSnapshot> = {}): OdooTempla
     weightKg: null,
     volume: null,
     taxNames: [],
+    taxDetails: [],
     taxable: true,
     optionNames: [],
     mainImageBase64: SAMPLE_PNG_BASE64,

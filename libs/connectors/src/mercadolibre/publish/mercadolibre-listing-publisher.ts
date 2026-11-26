@@ -8,18 +8,27 @@ import type {
 } from '../../sdk/capabilities/listing-publisher.js';
 import { ChannelType } from '../../sdk/channel-type.enum.js';
 import { ChannelError } from '../../sdk/errors/channel-error.js';
+import { MercadoLibreShippingPolicy } from '../mercadolibre.enums.js';
+import type { MercadoLibreSettings } from '../mercadolibre-settings.js';
 import { MercadoLibreCategoryReader } from '../taxonomy/mercadolibre-category.reader.js';
 import { MercadoLibreCategoryAttributesReader } from '../taxonomy/mercadolibre-category-attributes.reader.js';
 import {
   MercadoLibreAttributeIndex,
   missingRequiredAttributes,
 } from './mercadolibre-attributes.js';
+import {
+  evaluateMercadoLibreShippingPolicy,
+  MercadoLibreCommercialClient,
+  type MercadoLibreShippingDecision,
+} from './mercadolibre-commercial.client.js';
+import { mercadoLibreCondition } from './mercadolibre-condition.js';
 import { MercadoLibreItemLifecycle } from './mercadolibre-item-lifecycle.js';
 import {
   assertCategoryPriceBounds,
   listingPictures,
   maxCategoryPictures,
   mercadoLibrePrice,
+  resolveMercadoLibreListingType,
 } from './mercadolibre-item.mapper.js';
 import { hasVariationKeys, parseVariantKey } from './mercadolibre-keys.js';
 import type {
@@ -48,10 +57,11 @@ export class MercadoLibreListingPublisher implements Omit<ListingPublisher, 'upd
     private readonly media: MercadoLibreMediaUploader,
     private readonly writers: MercadoLibreListingWriters,
     private readonly lifecycle: MercadoLibreItemLifecycle,
+    private readonly commercial: MercadoLibreCommercialClient,
   ) {}
 
   async publish(session: ChannelSession, draft: ListingDraft): Promise<PublishedListing> {
-    const plan = await this.plan(session, draft, true);
+    const plan = await this.plan(session, draft, { resolveImages: true, evaluateShipping: true });
     return toPublished(plan, await this.writerFor(plan).publish(plan));
   }
 
@@ -60,7 +70,10 @@ export class MercadoLibreListingPublisher implements Omit<ListingPublisher, 'upd
     externalId: string,
     draft: ListingDraft,
   ): Promise<PublishedListing> {
-    const plan = await this.plan(session, draft, draft.imagesChanged !== false);
+    const plan = await this.plan(session, draft, {
+      resolveImages: draft.imagesChanged !== false,
+      evaluateShipping: false,
+    });
     return toPublished(plan, await this.writerFor(plan).update(plan, externalId));
   }
 
@@ -78,16 +91,17 @@ export class MercadoLibreListingPublisher implements Omit<ListingPublisher, 'upd
     await this.lifecycle.close(await session.accessToken(), itemIds);
   }
 
-  /** Checks settings, pictures, category, price bounds, and required attributes before writing. */
+  /** Checks settings, pictures, category, price bounds, listing type, shipping, and attributes. */
   private async plan(
     session: ChannelSession,
     draft: ListingDraft,
-    resolveImages: boolean,
+    options: { resolveImages: boolean; evaluateShipping: boolean },
   ): Promise<MercadoLibreListingPlan> {
     const settings = requireMercadoLibreSettings(draft.accountSettings ?? session.settings);
     if (listingPictures(draft).length === 0) {
       throw ChannelError.unmet(ChannelType.MercadoLibre, MERCADOLIBRE_NO_IMAGES);
     }
+    const listingTypeId = resolveMercadoLibreListingType(settings, draft);
     const accessToken = await session.accessToken();
     const { category, details } = await this.categories.resolveForPublish(
       accessToken,
@@ -103,7 +117,16 @@ export class MercadoLibreListingPublisher implements Omit<ListingPublisher, 'upd
     if (missing.length > 0) {
       throw ChannelError.unmet(ChannelType.MercadoLibre, missingAttributesRequirement(missing));
     }
-    const pictures = resolveImages
+    const shippingDecision = options.evaluateShipping
+      ? await this.resolveShippingDecision({
+          accessToken,
+          draft,
+          settings,
+          categoryId: category.id,
+          listingTypeId,
+        })
+      : undefined;
+    const pictures = options.resolveImages
       ? await this.media.resolvePictures(
           accessToken,
           draft.product.images,
@@ -116,9 +139,37 @@ export class MercadoLibreListingPublisher implements Omit<ListingPublisher, 'upd
       settings,
       category,
       categoryDetails: details,
+      listingTypeId,
+      ...(shippingDecision ? { shippingDecision } : {}),
       ...(pictures ? { pictures } : {}),
       attributes: index,
     };
+  }
+
+  private async resolveShippingDecision(params: {
+    accessToken: string;
+    draft: ListingDraft;
+    settings: MercadoLibreSettings;
+    categoryId: string;
+    listingTypeId: string;
+  }): Promise<MercadoLibreShippingDecision | undefined> {
+    const { settings, draft } = params;
+    if (!settings.shippingPolicy) return undefined;
+    const firstVariant = draft.variants[0];
+    const referencePrice = firstVariant ? mercadoLibrePrice(firstVariant.price, settings) : 0;
+    const quote =
+      settings.shippingPolicy === MercadoLibreShippingPolicy.Automatic
+        ? await this.commercial.readShippingCost({
+            accessToken: params.accessToken,
+            userId: settings.userId,
+            categoryId: params.categoryId,
+            listingTypeId: params.listingTypeId,
+            price: referencePrice,
+            currencyId: settings.currencyCode,
+            condition: mercadoLibreCondition(draft.condition),
+          })
+        : null;
+    return evaluateMercadoLibreShippingPolicy(settings, referencePrice, quote);
   }
 
   private writerFor(plan: MercadoLibreListingPlan): MercadoLibreListingWriter {

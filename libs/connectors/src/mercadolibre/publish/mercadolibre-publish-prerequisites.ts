@@ -23,6 +23,12 @@ export const MERCADOLIBRE_NO_CATEGORY: UnmetPublishRequirement = {
   reason: 'Mercado Libre suggested no category for this product. Choose one for it.',
 };
 
+export const MERCADOLIBRE_NO_LISTING_TYPE: UnmetPublishRequirement = {
+  requirement: PublishRequirement.AccountSettings,
+  reason:
+    'No Mercado Libre listing type is configured for this store. Refresh or choose a default listing type.',
+};
+
 const MISSING_ATTRIBUTES_PREFIX = 'Mercado Libre requires these item specifics in this category: ';
 const MISSING_ATTRIBUTES_SUFFIX = '. Add them in the listing’s item specifics.';
 const NAME_SEPARATOR = ', ';

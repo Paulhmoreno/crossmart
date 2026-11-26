@@ -99,7 +99,11 @@ export class MercadoLibreUserProductWriter implements MercadoLibreListingWriter 
   ): Promise<WrittenVariant> {
     const { accessToken, draft, settings, category, categoryDetails } = plan;
     const payload: MercadoLibreItemInput = {
-      ...newItemTerms(draft, settings, category.id, categoryDetails),
+      ...newItemTerms(draft, settings, category.id, {
+        category: categoryDetails,
+        listingTypeId: plan.listingTypeId,
+        freeShipping: plan.shippingDecision?.freeShipping,
+      }),
       family_name: familyName,
       pictures: plan.pictures ?? listingPictures(draft, categoryDetails),
       ...variantFields(plan, variant),

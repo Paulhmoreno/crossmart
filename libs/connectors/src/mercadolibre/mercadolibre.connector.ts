@@ -66,12 +66,13 @@ import {
   normalizeMercadoLibreSiteId,
 } from './mercadolibre-site.js';
 import { MercadoLibreOAuthClient } from './oauth/mercadolibre-oauth.client.js';
+import { resolveMercadoLibreListingType } from './publish/mercadolibre-item.mapper.js';
 import {
+  requireMercadoLibreSettings,
   unmetMercadoLibreAccountRequirements,
   unmetMercadoLibreProductRequirements,
 } from './publish/mercadolibre-publish-prerequisites.js';
 import { toCategoryAspects } from './taxonomy/mercadolibre-category-aspects.js';
-import { requireMercadoLibreSettings } from './publish/mercadolibre-publish-prerequisites.js';
 
 const NOT_AUTHORIZED = 'The app was not authorized on Mercado Libre';
 const OTHER_SITE =
@@ -214,7 +215,7 @@ export class MercadoLibreConnector
   ) {
     const settings = requireMercadoLibreSettings(session.settings);
     const accessToken = await session.accessToken();
-    const listingTypeId = params.listingTypeId || settings.defaultListingTypeId || 'bronze';
+    const listingTypeId = resolveMercadoLibreListingType(settings, undefined, params.listingTypeId);
     const [listingFees, shippingQuote] = await Promise.all([
       this.selling.commercial.readListingFees({
         accessToken,

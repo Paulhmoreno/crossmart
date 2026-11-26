@@ -79,6 +79,7 @@ export * from './mercadolibre/mercadolibre.enums.js';
 export * from './mercadolibre/mercadolibre-settings.js';
 export * from './mercadolibre/mercadolibre-site.js';
 export * from './mercadolibre/publish/mercadolibre-commercial.client.js';
+export { resolveMercadoLibreListingType } from './mercadolibre/publish/mercadolibre-item.mapper.js';
 export * from './sdk/auth/seller-credentials.js';
 export * from './falabella/falabella.connector.js';
 export * from './falabella/falabella-connector.module.js';

@@ -22,15 +22,12 @@ import {
   MercadoLibreShippingPolicy,
 } from './mercadolibre.enums.js';
 import { MercadoLibreSiteId } from './mercadolibre-site.js';
-import {
-  computeMercadoLibreEconomics,
-  evaluateMercadoLibreShippingPolicy,
-} from './publish/mercadolibre-commercial.client.js';
+import { evaluateMercadoLibreShippingPolicy } from './publish/mercadolibre-commercial.client.js';
 import {
   adaptMercadoLibreDescription,
   adaptMercadoLibreTitle,
 } from './publish/mercadolibre-content.adapter.js';
-import { resolveListingTypeId } from './publish/mercadolibre-item.mapper.js';
+import { resolveMercadoLibreListingType } from './publish/mercadolibre-item.mapper.js';
 import {
   describeMercadoLibreModeration,
   isMercadoLibreItemLive,
@@ -396,23 +393,6 @@ describe('Mercado Libre Ecuador (MEC) completion', () => {
       }),
     ).toMatchObject({ freeShipping: true, reason: 'fully_covered_by_channel' });
 
-    // Internal profitability snapshot
-    const econ = computeMercadoLibreEconomics({
-      price: 50,
-      unitCost: 22,
-      saleFeeAmount: 7.5,
-      sellerShippingCost: 3.5,
-    });
-    expect(econ).toEqual({
-      price: 50,
-      unitCost: 22,
-      saleFeeAmount: 7.5,
-      sellerShippingCost: 3.5,
-      netProceeds: 39,
-      estimatedMarginAmount: 17,
-      estimatedMarginPercent: 34,
-    });
-
     // Per-listing exception via native item specifics
     const draft = listingDraft({
       itemSpecifics: [{ name: 'Tipo de publicación', values: ['Premium'] }],
@@ -424,6 +404,6 @@ describe('Mercado Libre Ecuador (MEC) completion', () => {
         { id: 'gold_pro', name: 'Premium' },
       ],
     });
-    expect(resolveListingTypeId(draft, settings)).toBe('gold_pro');
+    expect(resolveMercadoLibreListingType(settings, draft)).toBe('gold_pro');
   });
 });

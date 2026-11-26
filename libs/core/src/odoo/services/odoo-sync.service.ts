@@ -80,11 +80,12 @@ function buildSourceMetadata(
     originalCategory: template.category,
     currency,
     taxes: template.taxNames,
+    taxDetails: template.taxDetails,
     weightKg: template.weightKg,
     volume: template.volume,
     customFields: template.customFieldValues,
     lastSyncedAt: syncedAt.toISOString(),
-  } as Prisma.InputJsonValue;
+  } as unknown as Prisma.InputJsonValue;
 }
 
 function readStoredSourceOrigin(raw: Prisma.JsonValue | null | undefined): string | null {

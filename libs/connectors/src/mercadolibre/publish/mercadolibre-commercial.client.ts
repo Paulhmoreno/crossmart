@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { FixedDecimal } from '@crossmart/common';
 import { z } from 'zod';
 import { MercadoLibreApiClient } from '../api/mercadolibre-api.client.js';
 import {
@@ -11,8 +12,7 @@ import { MercadoLibreShippingPolicy } from '../mercadolibre.enums.js';
 import type { MercadoLibreSettings } from '../mercadolibre-settings.js';
 import type { MercadoLibreSiteId } from '../mercadolibre-site.js';
 
-const PERCENT_SCALE = 100;
-const ROUNDING_FACTOR = 100;
+const MANDATORY_DISCOUNT_TYPE = 'mandatory';
 
 const listingPriceEntrySchema = z
   .object({
@@ -84,20 +84,6 @@ export interface MercadoLibreShippingDecision {
   mandatory: boolean;
 }
 
-export interface MercadoLibreEconomicsSnapshot {
-  price: number;
-  unitCost: number | null;
-  saleFeeAmount: number;
-  sellerShippingCost: number;
-  netProceeds: number;
-  estimatedMarginAmount: number | null;
-  estimatedMarginPercent: number | null;
-}
-
-function roundMoney(value: number): number {
-  return Math.round(value * ROUNDING_FACTOR) / ROUNDING_FACTOR;
-}
-
 /**
  * Evaluates the store's commercial shipping policy using ONLY real API shipping cost data.
  * Never invents costs or assumes free shipping when a quote fails.
@@ -145,36 +131,17 @@ function evaluateAutomaticPolicy(
   if (typeof maxCostPct !== 'number') {
     return { freeShipping: false, reason: 'max_cost_percent_not_configured', mandatory: false };
   }
-  const costPct = price > 0 ? (quote.sellerCost / price) * PERCENT_SCALE : PERCENT_SCALE;
-  if (costPct <= maxCostPct) {
+  const priceDec = FixedDecimal.parse(String(price));
+  const costDec = FixedDecimal.parse(String(quote.sellerCost));
+  const maxPctDec = FixedDecimal.parse(String(maxCostPct));
+  if (!priceDec || !costDec || !maxPctDec || !priceDec.greaterThan(FixedDecimal.ZERO)) {
+    return { freeShipping: false, reason: 'exceeds_max_cost_percent', mandatory: false };
+  }
+  const costPct = costDec.dividedBy(priceDec).times(FixedDecimal.ONE_HUNDRED);
+  if (!costPct.greaterThan(maxPctDec)) {
     return { freeShipping: true, reason: 'within_auto_cost_threshold', mandatory: false };
   }
   return { freeShipping: false, reason: 'exceeds_max_cost_percent', mandatory: false };
-}
-
-/** Internal profitability estimate combining real channel price, Odoo cost, ML fee, and shipping. */
-export function computeMercadoLibreEconomics(params: {
-  price: number;
-  unitCost: number | null;
-  saleFeeAmount: number;
-  sellerShippingCost: number;
-}): MercadoLibreEconomicsSnapshot {
-  const netProceeds = roundMoney(params.price - params.saleFeeAmount - params.sellerShippingCost);
-  const estimatedMarginAmount =
-    params.unitCost !== null ? roundMoney(netProceeds - params.unitCost) : null;
-  const estimatedMarginPercent =
-    estimatedMarginAmount !== null && params.price > 0
-      ? roundMoney((estimatedMarginAmount / params.price) * PERCENT_SCALE)
-      : null;
-  return {
-    price: roundMoney(params.price),
-    unitCost: params.unitCost !== null ? roundMoney(params.unitCost) : null,
-    saleFeeAmount: roundMoney(params.saleFeeAmount),
-    sellerShippingCost: roundMoney(params.sellerShippingCost),
-    netProceeds,
-    estimatedMarginAmount,
-    estimatedMarginPercent,
-  };
 }
 
 /** Queries real Mercado Libre listing fees and account-specific shipping costs (read-only). */
@@ -251,7 +218,7 @@ export class MercadoLibreCommercialClient {
         discountRate: coverage.discount?.rate ?? null,
         promotedAmount: coverage.discount?.promoted_amount ?? null,
         currencyId: coverage.currency_id ?? params.currencyId,
-        mandatoryFreeShipping: false,
+        mandatoryFreeShipping: coverage.discount?.type === MANDATORY_DISCOUNT_TYPE,
         errorReason: null,
       };
     } catch (error) {

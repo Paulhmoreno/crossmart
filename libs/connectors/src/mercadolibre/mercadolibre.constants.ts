@@ -1,5 +1,3 @@
-import { MercadoLibreListingType } from './mercadolibre.enums.js';
-
 /**
  * Mercado Libre's local-site API (`https://api.mercadolibre.com`), from its developer guides
  * (developers.mercadolibre.com.mx/en_us), except where a comment says otherwise.
@@ -95,12 +93,6 @@ export const MERCADOLIBRE_DESCRIPTION_MAX_LENGTH = 50_000;
 export const MERCADOLIBRE_DESCRIPTION_TARGET_LENGTH = 5_000;
 /** `max_pictures_per_item_var` is 10, the smallest picture limit the guides show. */
 export const MERCADOLIBRE_PICTURE_MAX_COUNT = 10;
-
-/**
- * New items are Classic (`gold_special`, Clásica), the lower-fee type every site offers with
- * no end date. Merchants can upgrade an item to Premium on Mercado Libre.
- */
-export const MERCADOLIBRE_DEFAULT_LISTING_TYPE = MercadoLibreListingType.Classic;
 
 /** Item attributes Crossmart fills itself (the Attributes and Product identifiers guides). */
 export enum MercadoLibreAttributeId {

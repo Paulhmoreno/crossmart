@@ -1,8 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import {
-  computeMercadoLibreEconomics,
   evaluateMercadoLibreShippingPolicy,
-  type MercadoLibreEconomicsSnapshot,
   type MercadoLibreListingFeeQuote,
   type MercadoLibreListingSetupInput,
   type MercadoLibreSettings,
@@ -10,10 +8,19 @@ import {
   type MercadoLibreShippingDecision,
   MercadoLibreConnector,
   isMercadoLibreSettings,
+  resolveMercadoLibreListingType,
 } from '@crossmart/connectors';
+import { PrismaService } from '@crossmart/database';
 import type { Actor } from '../../../activity/entities/actor.js';
 import { ActivityAction } from '../../../activity/enums/activity-action.enum.js';
 import { ActivityRecorder } from '../../../activity/services/activity-recorder.js';
+import {
+  calculateChannelEconomics,
+  type ChannelEconomicsResult,
+  type EconomicCostInput,
+  type EconomicTaxInput,
+  extractTaxFromSourceMetadata,
+} from '../../../listings/rules/channel-economics.js';
 import type { ChannelConnectionView } from '../../entities/channel-connection-view.js';
 import { callChannel } from '../../rules/channel-http-error.js';
 import {
@@ -29,12 +36,18 @@ const MERCADOLIBRE_ACCOUNT: ConnectionAccountKind<MercadoLibreSettings> = {
   isAccount: isMercadoLibreSettings,
   notThisChannel: 'This is not a Mercado Libre connection, or its account has not been read yet',
 };
+const ZERO_COST: EconomicCostInput = { status: 'confirmed_zero', amount: '0' };
+const UNKNOWN_COST: EconomicCostInput = { status: 'unknown' };
 
 export interface MercadoLibreCommercialPreviewInput {
   categoryId: string;
   price: number;
   unitCost?: number | null;
   listingTypeId?: string;
+  productId?: string;
+  taxRatePercent?: number | null;
+  priceIncludesTax?: boolean | null;
+  targetMarginPercent?: number | null;
 }
 
 export interface MercadoLibreCommercialPreviewResult {
@@ -44,7 +57,32 @@ export interface MercadoLibreCommercialPreviewResult {
   listingFees: MercadoLibreListingFeeQuote[];
   shippingQuote: MercadoLibreShippingCostQuote;
   shippingDecision: MercadoLibreShippingDecision;
-  economics: MercadoLibreEconomicsSnapshot;
+  economics: ChannelEconomicsResult;
+}
+
+function toKnownCost(amount: number | string | null | undefined): EconomicCostInput {
+  if (amount === null || amount === undefined) return UNKNOWN_COST;
+  const numeric = typeof amount === 'number' ? amount : Number(amount);
+  if (!Number.isFinite(numeric) || numeric < 0) return UNKNOWN_COST;
+  return numeric === 0 ? ZERO_COST : { status: 'known', amount: String(amount) };
+}
+
+function resolveFeeCost(
+  fees: readonly MercadoLibreListingFeeQuote[],
+  listingTypeId: string,
+): EconomicCostInput {
+  const matched = fees.find((fee) => fee.listingTypeId === listingTypeId);
+  if (!matched) return UNKNOWN_COST;
+  return toKnownCost(matched.saleFeeAmount);
+}
+
+function resolveShippingCostEntry(
+  decision: MercadoLibreShippingDecision,
+  quote: MercadoLibreShippingCostQuote,
+): EconomicCostInput {
+  if (!decision.freeShipping) return ZERO_COST;
+  if (!quote.available || quote.sellerCost === null) return UNKNOWN_COST;
+  return toKnownCost(quote.sellerCost);
 }
 
 /**
@@ -59,6 +97,7 @@ export class MercadoLibreSetupService {
     private readonly sessions: ChannelSessionFactory,
     private readonly mercadoLibre: MercadoLibreConnector,
     private readonly activity: ActivityRecorder,
+    private readonly prisma: PrismaService,
   ) {}
 
   async saveListingSetup(
@@ -113,29 +152,36 @@ export class MercadoLibreSetupService {
   ): Promise<MercadoLibreCommercialPreviewResult> {
     const { settings } = await this.load(workspaceId, connectionId);
     const session = await this.sessions.open(workspaceId, connectionId);
-    const listingTypeId = input.listingTypeId || settings.defaultListingTypeId || 'bronze';
-    const { listingFees, shippingQuote } = await callChannel(() =>
-      this.mercadoLibre.readCommercialQuote(session, {
-        categoryId: input.categoryId,
-        price: input.price,
-        listingTypeId,
-      }),
-    );
+    const listingTypeId = resolveMercadoLibreListingType(settings, undefined, input.listingTypeId);
+    const [{ listingFees, shippingQuote }, productFacts] = await Promise.all([
+      callChannel(() =>
+        this.mercadoLibre.readCommercialQuote(session, {
+          categoryId: input.categoryId,
+          price: input.price,
+          listingTypeId,
+        }),
+      ),
+      this.readProductFacts(workspaceId, input.productId),
+    ]);
     const shippingDecision = evaluateMercadoLibreShippingPolicy(
       settings,
       input.price,
       shippingQuote,
     );
-    const matchedFee = listingFees.find((fee) => fee.listingTypeId === listingTypeId);
-    const sellerShippingCost =
-      shippingDecision.freeShipping && shippingQuote.available && shippingQuote.sellerCost !== null
-        ? shippingQuote.sellerCost
-        : 0;
-    const economics = computeMercadoLibreEconomics({
-      price: input.price,
-      unitCost: input.unitCost ?? null,
-      saleFeeAmount: matchedFee?.saleFeeAmount ?? 0,
-      sellerShippingCost,
+    const tax = this.resolveTaxInput(input, productFacts.tax);
+    const unitCost =
+      input.unitCost !== undefined ? toKnownCost(input.unitCost) : toKnownCost(productFacts.cost);
+    const economics = calculateChannelEconomics({
+      currencyCode: settings.currencyCode,
+      publicPrice: String(input.price),
+      tax,
+      unitCost,
+      channelFee: resolveFeeCost(listingFees, listingTypeId),
+      sellerShippingCost: resolveShippingCostEntry(shippingDecision, shippingQuote),
+      targetMarginPercent:
+        input.targetMarginPercent !== undefined && input.targetMarginPercent !== null
+          ? String(input.targetMarginPercent)
+          : null,
     });
     return {
       categoryId: input.categoryId,
@@ -145,6 +191,43 @@ export class MercadoLibreSetupService {
       shippingQuote,
       shippingDecision,
       economics,
+    };
+  }
+
+  private resolveTaxInput(
+    input: MercadoLibreCommercialPreviewInput,
+    productTax: EconomicTaxInput | null,
+  ): EconomicTaxInput | null {
+    if (input.taxRatePercent !== undefined) {
+      return {
+        ratePercent: input.taxRatePercent !== null ? String(input.taxRatePercent) : null,
+        priceIncludesTax: input.priceIncludesTax ?? null,
+      };
+    }
+    return productTax;
+  }
+
+  private async readProductFacts(
+    workspaceId: string,
+    productId?: string,
+  ): Promise<{ cost: string | null; tax: EconomicTaxInput | null }> {
+    if (!productId) return { cost: null, tax: null };
+    const product = await this.prisma.product.findFirst({
+      where: { id: productId, workspaceId },
+      select: {
+        sourceMetadata: true,
+        variants: {
+          orderBy: { position: 'asc' },
+          take: 1,
+          select: { cost: true },
+        },
+      },
+    });
+    if (!product) return { cost: null, tax: null };
+    const variantCost = product.variants[0]?.cost;
+    return {
+      cost: variantCost !== null && variantCost !== undefined ? variantCost.toString() : null,
+      tax: extractTaxFromSourceMetadata(product.sourceMetadata),
     };
   }
 

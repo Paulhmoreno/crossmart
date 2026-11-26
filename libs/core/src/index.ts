@@ -141,6 +141,7 @@ export * from './listings/services/product-store-displays.js';
 export * from './listings/services/store-listing-states.js';
 export * from './listings/entities/listing-state-counts.js';
 export * from './listings/services/channel-price-resolver.js';
+export * from './listings/rules/channel-economics.js';
 export * from './listings/services/channel-sync.service.js';
 export * from './listings/services/sync-progress.service.js';
 export * from './listings/services/listing-editor.service.js';

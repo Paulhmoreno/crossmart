@@ -80,6 +80,10 @@ export function mercadoLibreSettings(
     currencyCode: 'ARS',
     permalink: 'http://perfil.mercadolibre.com.ar/TETE2870021',
     userProductSeller: false,
+    availableListingTypes: [
+      { id: 'gold_special', name: 'Clásica' },
+      { id: 'gold_pro', name: 'Premium' },
+    ],
     ...overrides,
   };
 }
@@ -166,6 +170,7 @@ export function createMercadoLibreTestKit(
   const media = new MercadoLibreMediaUploader(http, imageFetcher);
   const categories = new MercadoLibreCategoryReader(api);
   const attributes = new MercadoLibreCategoryAttributesReader(api);
+  const commercial = new MercadoLibreCommercialClient(api);
   const publisher = new MercadoLibreListingPublisher(
     categories,
     attributes,
@@ -175,13 +180,14 @@ export function createMercadoLibreTestKit(
       new MercadoLibreUserProductWriter(items, lifecycle, verifier),
     ),
     lifecycle,
+    commercial,
   );
   const selling = new MercadoLibreSellingServices(
     publisher,
     new MercadoLibrePriceUpdater(items, lifecycle),
     categories,
     attributes,
-    new MercadoLibreCommercialClient(api),
+    commercial,
   );
   const sync = new MercadoLibreSyncServices(
     new MercadoLibreUserReader(api),
