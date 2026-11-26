@@ -15,4 +15,11 @@ Read [CLAUDE.md](CLAUDE.md), [CONTRIBUTING.md](CONTRIBUTING.md) and [IMPLEMENTAT
 - No production writes, real listings, real orders or destructive operations without explicit authorization for that operation. Use staging, drafts or sandbox where supported. Never bypass security or marketplace rules.
 - Update the status in IMPLEMENTATION.md only with evidence. No extra planning documents unless an upstream convention or concrete technical need requires one.
 
+## Permanent interface and localization rules
+
+- The companion frontend AGENTS.md defines the mandatory UI standard: faithful upstream Crossmart design, English canonical interface language with centralized English and Spanish (Ecuador) translations, and concise non-intrusive copy. Follow it for every new integration.
+- Keep machine-readable identifiers, API contracts and technical diagnostics stable and in English. Localize operator-visible messages through the shared UI translation mechanism, using stable error codes or narrowly scoped mappings as needed. Do not hard-code a second language in backend responses or change existing API semantics just to translate a label.
+- Keep commercial product content and agent output language separate from the interface locale. Do not regenerate or translate saved product content on a UI language change.
+- Never remove validation, authorization, meaningful errors or ERP source ownership protections during visual cleanup. Do not build extra UI explanations for backend safeguards.
+
 Code, commits and repository documentation are in English, as required upstream.
