@@ -182,9 +182,99 @@ function toEventView(row: SalesEvent): SalesEventView {
  */
 @Injectable()
 export class SalesKnowledgeService {
+  private readonly migratedWorkspaces = new Set<string>();
+
   constructor(private readonly prisma: PrismaService) {}
 
+  /**
+   * Safe, idempotent migration of legacy `workspace_agent_configs.commercial_policy` fields
+   * into `sales_knowledge_entries` (global scope). Detects duplicates and contradictions:
+   * - Identical active entry -> skipped
+   * - Conflicting active entry in same category -> creates PENDING learning proposal for review
+   * - Otherwise -> creates ACTIVE versioned entry with `source: 'legacy_policy_migration'`
+   */
+  async ensureLegacyPolicyMigrated(workspaceId: string): Promise<void> {
+    if (this.migratedWorkspaces.has(workspaceId)) return;
+    const cfg = await this.prisma.workspaceAgentConfig.findUnique({
+      where: { workspaceId_agentKey: { workspaceId, agentKey: 'sales' } },
+      select: { commercialPolicy: true, updatedById: true },
+    });
+    const raw = cfg?.commercialPolicy;
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+      this.migratedWorkspaces.add(workspaceId);
+      return;
+    }
+    const obj = raw as Record<string, unknown>;
+    const mappings: Array<{ key: string; category: SalesKnowledgeCategory; title: string }> = [
+      { key: 'businessName', category: 'business_info', title: 'Nombre comercial del negocio' },
+      { key: 'paymentNotes', category: 'payment_methods', title: 'Formas y condiciones de pago' },
+      {
+        key: 'deliveryNotes',
+        category: 'delivery_coverage',
+        title: 'Condiciones de envío y entrega',
+      },
+      { key: 'warrantyNotes', category: 'warranties', title: 'Garantías y devoluciones' },
+      { key: 'tone', category: 'service_style', title: 'Estilo de atención comercial' },
+    ];
+
+    const existingEntries = await this.prisma.salesKnowledgeEntry.findMany({
+      where: { workspaceId, status: SalesKnowledgeStatus.ACTIVE, scope: 'global' },
+    });
+    const existingProposals = await this.prisma.salesLearningProposal.findMany({
+      where: { workspaceId, originType: 'legacy_policy_migration' },
+    });
+
+    for (const item of mappings) {
+      const rawVal = obj[item.key];
+      const value = typeof rawVal === 'string' ? rawVal.trim() : '';
+      if (!value) continue;
+      const sameCategory = existingEntries.filter((entry) => entry.category === item.category);
+      const alreadyMigrated = sameCategory.some(
+        (entry) =>
+          entry.source === 'legacy_policy_migration' ||
+          entry.content.trim().toLowerCase() === value.toLowerCase(),
+      );
+      if (alreadyMigrated) continue;
+
+      if (sameCategory.length > 0) {
+        const alreadyProposed = existingProposals.some(
+          (prop) =>
+            prop.category === item.category &&
+            prop.proposedContent.trim().toLowerCase() === value.toLowerCase(),
+        );
+        if (!alreadyProposed) {
+          await this.createProposal(workspaceId, {
+            category: item.category,
+            scope: 'global',
+            title: item.title,
+            proposedContent: value,
+            rationale:
+              'Valor previo detectado en configuración; requiere revisión por posible conflicto.',
+            originType: 'conversation_review',
+          });
+        }
+        continue;
+      }
+
+      const created = await this.prisma.salesKnowledgeEntry.create({
+        data: {
+          workspaceId,
+          category: item.category,
+          scope: 'global',
+          title: item.title,
+          content: value,
+          source: 'legacy_policy_migration',
+          approvedById: cfg.updatedById,
+        },
+      });
+      existingEntries.push(created);
+    }
+
+    this.migratedWorkspaces.add(workspaceId);
+  }
+
   async listEntries(workspaceId: string): Promise<SalesKnowledgeEntryView[]> {
+    await this.ensureLegacyPolicyMigrated(workspaceId);
     const rows = await this.prisma.salesKnowledgeEntry.findMany({
       where: { workspaceId, status: SalesKnowledgeStatus.ACTIVE },
       orderBy: [{ scope: 'asc' }, { category: 'asc' }, { updatedAt: 'desc' }],
@@ -413,6 +503,7 @@ export class SalesKnowledgeService {
     workspaceId: string,
     channelType?: string | null,
   ): Promise<SalesKnowledgeEntryView[]> {
+    await this.ensureLegacyPolicyMigrated(workspaceId);
     const slug = normalizeChannelSlug(channelType);
     const scopes = slug === 'global' ? ['global'] : ['global', `channel:${slug}`];
     const rows = await this.prisma.salesKnowledgeEntry.findMany({
