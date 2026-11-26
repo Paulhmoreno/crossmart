@@ -9,11 +9,29 @@ export const domainDiscoverySchema = z.array(
   }),
 );
 
+/** Category settings returned by `GET /categories/{category_id}`. */
+export const mercadoLibreCategorySettingsSchema = z
+  .object({
+    listing_allowed: z.boolean().optional(),
+    max_title_length: z.number().int().positive().optional(),
+    max_pictures_per_item: z.number().int().positive().optional(),
+    max_pictures_per_item_var: z.number().int().positive().optional(),
+    minimum_price: z.number().nonnegative().nullable().optional(),
+    maximum_price: z.number().positive().nullable().optional(),
+    shipping_modes: z.array(z.string()).default([]),
+    item_conditions: z.array(z.string()).default([]),
+  })
+  .loose();
+
+export type MercadoLibreCategorySettings = z.infer<typeof mercadoLibreCategorySettingsSchema>;
+
 /** The fields Crossmart reads from `GET /categories/{category_id}`. */
 export const mercadoLibreCategorySchema = z.object({
   id: z.string(),
   name: z.string(),
   path_from_root: z.array(z.object({ id: z.string(), name: z.string() })).default([]),
+  children_categories: z.array(z.object({ id: z.string(), name: z.string() })).default([]),
+  settings: mercadoLibreCategorySettingsSchema.optional(),
 });
 
 export type MercadoLibreCategory = z.infer<typeof mercadoLibreCategorySchema>;

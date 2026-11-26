@@ -74,6 +74,7 @@ export * from './etsy/listing/etsy-listing-setup.js';
 export * from './mercadolibre/mercadolibre.connector.js';
 export * from './mercadolibre/mercadolibre-connector.module.js';
 export * from './mercadolibre/mercadolibre-content-limits.js';
+export * from './mercadolibre/mercadolibre.enums.js';
 export * from './mercadolibre/mercadolibre-settings.js';
 export * from './mercadolibre/mercadolibre-site.js';
 export * from './sdk/auth/seller-credentials.js';

@@ -178,8 +178,26 @@ export class MercadoLibreConnector
   async describeAccount(
     session: ChannelSession,
   ): Promise<ChannelAccountProfile<MercadoLibreSettings>> {
-    const user = await this.sync.user.readMe(await session.accessToken());
-    return { displayName: user.nickname, settings: toSettings(user) };
+    const accessToken = await session.accessToken();
+    const user = await this.sync.user.readMe(accessToken);
+    const settings = toSettings(user);
+    const availableListingTypes = await this.sync.user
+      .readListingTypes(accessToken, settings.siteId)
+      .catch(() => []);
+    return {
+      displayName: user.nickname,
+      settings: {
+        ...settings,
+        ...(availableListingTypes.length > 0 ? { availableListingTypes } : {}),
+        importOrders: false,
+      },
+    };
+  }
+
+  /** Reads the real site listing types from Mercado Libre (`GET /sites/{site_id}/listing_types`). */
+  async refreshListingTypes(session: ChannelSession): Promise<{ id: string; name: string }[]> {
+    const settings = requireMercadoLibreSettings(session.settings);
+    return this.sync.user.readListingTypes(await session.accessToken(), settings.siteId);
   }
 
   parseSettings(raw: unknown): MercadoLibreSettings {

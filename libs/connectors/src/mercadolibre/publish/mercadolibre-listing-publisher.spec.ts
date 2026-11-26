@@ -19,6 +19,8 @@ import {
   listingDraft,
   mercadoLibreSession,
   mercadoLibreSettings,
+  USER_ID,
+  VALIDATE_ITEMS_URL,
   VARIANT_BLACK,
   VARIANT_BROWN,
 } from '../mercadolibre.fixtures.js';
@@ -38,27 +40,40 @@ function requestsTo(http: { requests: HttpRequest[] }, method: HttpMethod, url: 
 
 function setup() {
   const kit = createMercadoLibreTestKit();
-  kit.http.expect(
-    HttpMethod.Get,
-    ATTRIBUTES_URL,
-    fixtureResponse(FIXTURES, 'category-attributes.json'),
-  );
+  kit.http
+    .expect(HttpMethod.Get, CATEGORY_URL, fixtureResponse(FIXTURES, 'category.json'))
+    .expect(HttpMethod.Get, ATTRIBUTES_URL, fixtureResponse(FIXTURES, 'category-attributes.json'));
   return kit;
 }
 
+function ownedFixture(name: string, overrides: Record<string, unknown> = {}) {
+  const item = fixtureJson<Record<string, unknown>>(name);
+  return { ...item, seller_id: Number(USER_ID), category_id: CATEGORY.id, ...overrides };
+}
+
 function userProductItem(id: string, overrides: Record<string, unknown> = {}) {
-  const item = fixtureJson<Record<string, unknown>>('user-product-item.json');
-  return jsonResponse({ ...item, id, ...overrides });
+  return jsonResponse(ownedFixture('user-product-item.json', { id, ...overrides }));
 }
 
 describe('MercadoLibreListingPublisher', () => {
   describe('one item with variations (sellers without User Products)', () => {
-    it('creates the item with a variation per variant, then its description', async () => {
+    it('validates, creates the item with variations, writes description, and verifies read-back', async () => {
       const { connector, http } = setup();
       http
+        .expect(HttpMethod.Post, VALIDATE_ITEMS_URL, jsonResponse({}))
         .expect(HttpMethod.Post, ITEMS_URL, fixtureResponse(FIXTURES, 'item-with-variations.json'))
         .expect(
           HttpMethod.Post,
+          descriptionUrl(ITEM_ID),
+          fixtureResponse(FIXTURES, 'description.json'),
+        )
+        .expect(
+          HttpMethod.Get,
+          itemUrl(ITEM_ID),
+          jsonResponse(ownedFixture('item-with-variations.json')),
+        )
+        .expect(
+          HttpMethod.Get,
           descriptionUrl(ITEM_ID),
           fixtureResponse(FIXTURES, 'description.json'),
         );
@@ -83,7 +98,11 @@ describe('MercadoLibreListingPublisher', () => {
             { id: 'SELLER_SKU', value_name: ['CEL-NEGRO', 'CEL-MARRON'][position] },
             { id: 'GTIN', value_name: ['4006381333931', '9780471117094'][position] },
           ],
-          attribute_combinations: [{ id: 'COLOR', value_name: ['Negro', 'Marrón'][position] }],
+          attribute_combinations: [
+            position === 0
+              ? { id: 'COLOR', value_id: '52049', value_name: 'Negro' }
+              : { id: 'COLOR', value_name: 'Marrón' },
+          ],
           picture_ids: ['https://cdn.example.com/celular.jpg'],
           seller_custom_field: variantId,
         })),
@@ -126,13 +145,19 @@ describe('MercadoLibreListingPublisher', () => {
 
     it('updates the item in place, keeping the title once it has sales', async () => {
       const { connector, http } = setup();
-      const sold = { ...fixtureJson('item-with-variations.json'), sold_quantity: 2 };
+      const sold = ownedFixture('item-with-variations.json', { sold_quantity: 2 });
       http
         .expect(HttpMethod.Get, itemUrl(ITEM_ID), jsonResponse(sold))
         .expect(HttpMethod.Put, itemUrl(ITEM_ID), jsonResponse(sold))
         .expect(
           HttpMethod.Put,
           `${descriptionUrl(ITEM_ID)}?api_version=2`,
+          fixtureResponse(FIXTURES, 'description.json'),
+        )
+        .expect(HttpMethod.Get, itemUrl(ITEM_ID), jsonResponse(sold))
+        .expect(
+          HttpMethod.Get,
+          descriptionUrl(ITEM_ID),
           fixtureResponse(FIXTURES, 'description.json'),
         );
       const draft = listingDraft({ imagesChanged: false });
@@ -157,20 +182,34 @@ describe('MercadoLibreListingPublisher', () => {
       http.assertDone();
     });
 
-    it('pauses the item of an inactive product', async () => {
+    it('pauses the item of an inactive product and verifies paused state on read-back', async () => {
       const { connector, http } = setup();
-      const created = fixtureJson('item-created.json');
+      const created = ownedFixture('item-created.json');
+      const paused = { ...created, status: 'paused' };
       http
+        .expect(
+          HttpMethod.Get,
+          `${API}/users/202593498/items/search?seller_sku=CEL-NEGRO`,
+          jsonResponse({ results: [] }),
+        )
+        .expect(
+          HttpMethod.Get,
+          `${API}/products/search?site_id=MLA&status=active&product_identifier=4006381333931&limit=5`,
+          jsonResponse({ results: [] }),
+        )
+        .expect(HttpMethod.Post, VALIDATE_ITEMS_URL, jsonResponse({}))
         .expect(HttpMethod.Post, ITEMS_URL, jsonResponse(created))
         .expect(
           HttpMethod.Post,
           descriptionUrl('MLB1548991737'),
           fixtureResponse(FIXTURES, 'description.json'),
         )
+        .expect(HttpMethod.Put, itemUrl('MLB1548991737'), jsonResponse(paused))
+        .expect(HttpMethod.Get, itemUrl('MLB1548991737'), jsonResponse(paused))
         .expect(
-          HttpMethod.Put,
-          itemUrl('MLB1548991737'),
-          jsonResponse({ ...created, status: 'paused' }),
+          HttpMethod.Get,
+          descriptionUrl('MLB1548991737'),
+          fixtureResponse(FIXTURES, 'description.json'),
         );
       const draft = listingDraft({ variants: [draftVariant()] });
       draft.product = { ...draft.product, active: false, optionNames: [] };
@@ -188,18 +227,32 @@ describe('MercadoLibreListingPublisher', () => {
   });
 
   describe('User Products sellers', () => {
-    it('creates an item per variant under one family name', async () => {
+    it('creates an item per variant under one family name and verifies each', async () => {
       const { connector, http } = setup();
       http
+        .expect(HttpMethod.Post, VALIDATE_ITEMS_URL, jsonResponse({}))
         .expect(HttpMethod.Post, ITEMS_URL, userProductItem(UP_ITEM_ID))
         .expect(
           HttpMethod.Post,
           descriptionUrl(UP_ITEM_ID),
           fixtureResponse(FIXTURES, 'description.json'),
         )
+        .expect(HttpMethod.Get, itemUrl(UP_ITEM_ID), userProductItem(UP_ITEM_ID))
+        .expect(
+          HttpMethod.Get,
+          descriptionUrl(UP_ITEM_ID),
+          fixtureResponse(FIXTURES, 'description.json'),
+        )
+        .expect(HttpMethod.Post, VALIDATE_ITEMS_URL, jsonResponse({}))
         .expect(HttpMethod.Post, ITEMS_URL, userProductItem(UP_SECOND_ITEM_ID))
         .expect(
           HttpMethod.Post,
+          descriptionUrl(UP_SECOND_ITEM_ID),
+          fixtureResponse(FIXTURES, 'description.json'),
+        )
+        .expect(HttpMethod.Get, itemUrl(UP_SECOND_ITEM_ID), userProductItem(UP_SECOND_ITEM_ID))
+        .expect(
+          HttpMethod.Get,
           descriptionUrl(UP_SECOND_ITEM_ID),
           fixtureResponse(FIXTURES, 'description.json'),
         );
@@ -232,34 +285,33 @@ describe('MercadoLibreListingPublisher', () => {
       http.assertDone();
     });
 
-    it('closes the items it created when a later one is refused, naming Mercado Libre’s cause', async () => {
+    it('preserves already-created items without auto-closing when a later variant is refused', async () => {
       const { connector, http } = setup();
       http
+        .expect(HttpMethod.Post, VALIDATE_ITEMS_URL, jsonResponse({}))
         .expect(HttpMethod.Post, ITEMS_URL, userProductItem(UP_ITEM_ID))
         .expect(
           HttpMethod.Post,
           descriptionUrl(UP_ITEM_ID),
           fixtureResponse(FIXTURES, 'description.json'),
         )
-        .expect(
-          HttpMethod.Post,
-          ITEMS_URL,
-          fixtureResponse(FIXTURES, 'missing-gtin-reason.json', 400),
-        )
         .expect(HttpMethod.Get, itemUrl(UP_ITEM_ID), userProductItem(UP_ITEM_ID))
         .expect(
-          HttpMethod.Put,
-          itemUrl(UP_ITEM_ID),
-          userProductItem(UP_ITEM_ID, { status: 'closed' }),
+          HttpMethod.Get,
+          descriptionUrl(UP_ITEM_ID),
+          fixtureResponse(FIXTURES, 'description.json'),
+        )
+        .expect(
+          HttpMethod.Post,
+          VALIDATE_ITEMS_URL,
+          fixtureResponse(FIXTURES, 'missing-gtin-reason.json', 400),
         );
 
       await expect(connector.publish(UP_SESSION, listingDraft())).rejects.toMatchObject({
         code: ChannelErrorCode.RequestRejected,
         message: expect.stringContaining('[EMPTY_GTIN_REASON] are required') as string,
       });
-      expect(body(requestsTo(http, HttpMethod.Put, itemUrl(UP_ITEM_ID))[0])).toEqual({
-        status: 'closed',
-      });
+      expect(requestsTo(http, HttpMethod.Put, itemUrl(UP_ITEM_ID))).toHaveLength(0);
       http.assertDone();
     });
 
@@ -274,9 +326,22 @@ describe('MercadoLibreListingPublisher', () => {
           `${descriptionUrl(UP_ITEM_ID)}?api_version=2`,
           fixtureResponse(FIXTURES, 'description.json'),
         )
+        .expect(HttpMethod.Get, itemUrl(UP_ITEM_ID), userProductItem(UP_ITEM_ID))
+        .expect(
+          HttpMethod.Get,
+          descriptionUrl(UP_ITEM_ID),
+          fixtureResponse(FIXTURES, 'description.json'),
+        )
+        .expect(HttpMethod.Post, VALIDATE_ITEMS_URL, jsonResponse({}))
         .expect(HttpMethod.Post, ITEMS_URL, userProductItem(UP_SECOND_ITEM_ID))
         .expect(
           HttpMethod.Post,
+          descriptionUrl(UP_SECOND_ITEM_ID),
+          fixtureResponse(FIXTURES, 'description.json'),
+        )
+        .expect(HttpMethod.Get, itemUrl(UP_SECOND_ITEM_ID), userProductItem(UP_SECOND_ITEM_ID))
+        .expect(
+          HttpMethod.Get,
           descriptionUrl(UP_SECOND_ITEM_ID),
           fixtureResponse(FIXTURES, 'description.json'),
         );
@@ -308,7 +373,9 @@ describe('MercadoLibreListingPublisher', () => {
       for (const attribute of attributes) {
         if (attribute.id === 'MODEL') attribute.tags = { required: true };
       }
-      http.expect(HttpMethod.Get, ATTRIBUTES_URL, jsonResponse(attributes));
+      http
+        .expect(HttpMethod.Get, CATEGORY_URL, fixtureResponse(FIXTURES, 'category.json'))
+        .expect(HttpMethod.Get, ATTRIBUTES_URL, jsonResponse(attributes));
 
       await expect(connector.publish(mercadoLibreSession(), listingDraft())).rejects.toMatchObject({
         requirement: PublishRequirement.ItemSpecifics,
@@ -331,12 +398,12 @@ describe('MercadoLibreListingPublisher', () => {
       });
     });
 
-    it('predicts a category for a listing without one', async () => {
+    it('predicts a category for a listing without one using title and brand', async () => {
       const { connector, http } = createMercadoLibreTestKit();
       http
         .expect(
           HttpMethod.Get,
-          /\/sites\/MLA\/domain_discovery\/search\?q=Item\+de\+testeo&limit=4$/,
+          /\/sites\/MLA\/domain_discovery\/search\?q=Item\+de\+testeo\+Eiffel&limit=4$/,
           fixtureResponse(FIXTURES, 'domain-discovery.json'),
         )
         .expect(HttpMethod.Get, CATEGORY_URL, fixtureResponse(FIXTURES, 'category.json'))
@@ -345,9 +412,20 @@ describe('MercadoLibreListingPublisher', () => {
           ATTRIBUTES_URL,
           fixtureResponse(FIXTURES, 'category-attributes.json'),
         )
+        .expect(HttpMethod.Post, VALIDATE_ITEMS_URL, jsonResponse({}))
         .expect(HttpMethod.Post, ITEMS_URL, fixtureResponse(FIXTURES, 'item-with-variations.json'))
         .expect(
           HttpMethod.Post,
+          descriptionUrl(ITEM_ID),
+          fixtureResponse(FIXTURES, 'description.json'),
+        )
+        .expect(
+          HttpMethod.Get,
+          itemUrl(ITEM_ID),
+          jsonResponse(ownedFixture('item-with-variations.json')),
+        )
+        .expect(
+          HttpMethod.Get,
           descriptionUrl(ITEM_ID),
           fixtureResponse(FIXTURES, 'description.json'),
         );

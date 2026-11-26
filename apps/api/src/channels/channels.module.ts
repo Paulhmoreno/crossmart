@@ -10,6 +10,7 @@ import { EbayAccountController } from './controllers/ebay-account.controller.js'
 import { EbayAccountDeletionController } from './controllers/ebay-account-deletion.controller.js';
 import { EtsyShopController } from './controllers/etsy-shop.controller.js';
 import { GoogleMerchantAccountController } from './controllers/google-merchant-account.controller.js';
+import { MercadoLibreAccountController } from './controllers/mercadolibre-account.controller.js';
 import { OAuthNonceCookie } from './services/oauth-nonce.cookie.js';
 
 @Module({
@@ -24,6 +25,7 @@ import { OAuthNonceCookie } from './services/oauth-nonce.cookie.js';
     EbayAccountDeletionController,
     GoogleMerchantAccountController,
     EtsyShopController,
+    MercadoLibreAccountController,
   ],
   providers: [OAuthNonceCookie],
 })

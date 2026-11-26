@@ -4,12 +4,14 @@ import {
   type ChannelType,
   type ChannelWebhookEvent,
   ChannelWebhookKind,
+  isMercadoLibreSettings,
 } from '@crossmart/connectors';
 import { ChannelConnectionStatus } from '@crossmart/database';
 import { Actor } from '../../activity/entities/actor.js';
 import { ActivityAction } from '../../activity/enums/activity-action.enum.js';
 import { ActivityRecorder } from '../../activity/services/activity-recorder.js';
 import { ChannelEventBus } from '../../events/services/channel-event-bus.js';
+import { parseConnectionSettings } from '../entities/connection-settings.js';
 import type { ChannelConnectionRecord } from '../repositories/channel-connection.queries.js';
 import { ChannelConnectionRepository } from '../repositories/channel-connection.repository.js';
 import { connectionSubject } from '../rules/connection-subject.js';
@@ -37,7 +39,9 @@ export class ChannelWebhookDispatcher {
         await this.connections.redactAccount(account, new Date());
         return this.acknowledge(event, 'account data erased');
       case ChannelWebhookKind.OrderChanged:
-        return this.orderChanged(account, event.resourceId);
+        return this.orderChanged(connector, account, event.resourceId);
+      case ChannelWebhookKind.ListingChanged:
+        return this.listingChanged(account, event.resourceId, event.topic);
       case ChannelWebhookKind.CustomerDataRequested:
       case ChannelWebhookKind.CustomerRedactionRequested:
         // Orders are stored without buyer details, so there is nothing about a buyer to send or erase.
@@ -47,8 +51,9 @@ export class ChannelWebhookDispatcher {
     }
   }
 
-  /** Every connection of the account reads the order; each may belong to another workspace. */
+  /** Every connection of the account reads the order unless order import is disabled for safety. */
   private async orderChanged(
+    connector: ChannelConnector,
     account: { channel: ChannelType; externalAccountId: string },
     externalOrderId: string | undefined,
   ): Promise<void> {
@@ -56,10 +61,31 @@ export class ChannelWebhookDispatcher {
     const connections = await this.connections.findByAccount(account);
     for (const connection of connections) {
       if (connection.status !== ChannelConnectionStatus.CONNECTED) continue;
+      const { account: settings } = parseConnectionSettings(connector, connection.settings);
+      if (settings && isMercadoLibreSettings(settings) && settings.importOrders !== true) continue;
       await this.events.orderChanged({
         workspaceId: connection.workspaceId,
         connectionId: connection.id,
         externalOrderId,
+      });
+    }
+  }
+
+  /** Every connected workspace of the account reconciles the listing state asynchronously. */
+  private async listingChanged(
+    account: { channel: ChannelType; externalAccountId: string },
+    externalListingId: string | undefined,
+    topic: string,
+  ): Promise<void> {
+    if (!externalListingId) return;
+    const connections = await this.connections.findByAccount(account);
+    for (const connection of connections) {
+      if (connection.status !== ChannelConnectionStatus.CONNECTED) continue;
+      await this.events.listingChanged({
+        workspaceId: connection.workspaceId,
+        connectionId: connection.id,
+        externalListingId,
+        topic,
       });
     }
   }

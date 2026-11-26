@@ -13,10 +13,13 @@ import {
 import { MercadoLibreNotificationParser } from './notifications/mercadolibre-notification.parser.js';
 import { MercadoLibreOAuthClient } from './oauth/mercadolibre-oauth.client.js';
 import { MercadoLibreOrderSource } from './orders/mercadolibre-order-source.js';
+import { MercadoLibreCatalogMatcher } from './publish/mercadolibre-catalog.matcher.js';
 import { MercadoLibreItemClient } from './publish/mercadolibre-item.client.js';
 import { MercadoLibreItemLifecycle } from './publish/mercadolibre-item-lifecycle.js';
+import { MercadoLibreItemVerifier } from './publish/mercadolibre-item.verifier.js';
 import { MercadoLibreListingWriters } from './publish/mercadolibre-listing-writers.js';
 import { MercadoLibreListingPublisher } from './publish/mercadolibre-listing-publisher.js';
+import { MercadoLibreMediaUploader } from './publish/mercadolibre-media.uploader.js';
 import { MercadoLibrePriceUpdater } from './publish/mercadolibre-price-updater.js';
 import { MercadoLibreSingleItemWriter } from './publish/mercadolibre-single-item.writer.js';
 import { MercadoLibreUserProductWriter } from './publish/mercadolibre-user-product.writer.js';
@@ -39,6 +42,9 @@ import { MercadoLibreCategoryAttributesReader } from './taxonomy/mercadolibre-ca
     MercadoLibreCategoryAttributesReader,
     MercadoLibreItemClient,
     MercadoLibreItemLifecycle,
+    MercadoLibreItemVerifier,
+    MercadoLibreCatalogMatcher,
+    MercadoLibreMediaUploader,
     MercadoLibreSingleItemWriter,
     MercadoLibreUserProductWriter,
     MercadoLibreListingWriters,

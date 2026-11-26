@@ -27,6 +27,7 @@ preview that only platform admins see.
 
 | Site id | Country   | Currency | Decimals | Sign-in                            |
 | ------- | --------- | -------- | -------- | ---------------------------------- |
+| `MEC`   | Ecuador   | USD      | 2        | `https://auth.mercadolibre.com.ec` |
 | `MLM`   | Mexico    | MXN      | 2        | `https://auth.mercadolibre.com.mx` |
 | `MLC`   | Chile     | CLP      | 0        | `https://auth.mercadolibre.cl`     |
 | `MCO`   | Colombia  | COP      | 0        | `https://auth.mercadolibre.com.co` |

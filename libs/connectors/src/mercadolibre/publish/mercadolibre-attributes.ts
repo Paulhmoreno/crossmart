@@ -18,30 +18,46 @@ function nameKey(name: string): string {
 }
 
 /**
- * A category's attributes by name, so the merchant's item specifics and option names (which
- * use the names the category shows) are sent by attribute id. Names Mercado Libre does not
- * know are sent as custom attributes where the account allows them (User Products).
+ * A category's attributes by name and id, so item specifics and option names are sent using
+ * official attribute ids and official `value_id` when a value matches the category's allowed list.
  */
 export class MercadoLibreAttributeIndex {
   private readonly byName: ReadonlyMap<string, MercadoLibreAttribute>;
+  private readonly byId: ReadonlyMap<string, MercadoLibreAttribute>;
 
   constructor(
     readonly attributes: readonly MercadoLibreAttribute[],
     private readonly allowsCustom: boolean,
   ) {
     this.byName = new Map(attributes.map((attribute) => [nameKey(attribute.name), attribute]));
+    this.byId = new Map(attributes.map((attribute) => [attribute.id, attribute]));
   }
 
-  /** The attribute named so, sent by id; a custom one, or null when the account has none. */
+  /** The attribute named so, sent by id (with official `value_id` when matched), or custom. */
   toInput(name: string, values: readonly string[]): MercadoLibreAttributeInput | null {
     const valueName = values.join(VALUE_SEPARATOR);
-    const attribute = this.byName.get(nameKey(name));
-    if (attribute) return { id: attribute.id, value_name: valueName };
+    const attribute = this.byName.get(nameKey(name)) ?? this.byId.get(name.trim().toUpperCase());
+    if (attribute) {
+      const matchedValue =
+        values.length === 1
+          ? attribute.values.find(
+              (candidate) =>
+                nameKey(candidate.name) === nameKey(valueName) || candidate.id === valueName,
+            )
+          : undefined;
+      return matchedValue
+        ? { id: attribute.id, value_id: matchedValue.id, value_name: matchedValue.name }
+        : { id: attribute.id, value_name: valueName };
+    }
     return this.allowsCustom ? { name: name.trim(), value_name: valueName } : null;
   }
 
   has(name: string): boolean {
-    return this.byName.has(nameKey(name));
+    return this.byName.has(nameKey(name)) || this.byId.has(name.trim().toUpperCase());
+  }
+
+  byAttributeId(id: string): MercadoLibreAttribute | undefined {
+    return this.byId.get(id);
   }
 }
 
@@ -93,12 +109,30 @@ export function optionAttributes(
   });
 }
 
-/** What identifies a variant: its SKU (`SELLER_SKU`) and barcode (`GTIN`). */
-export function identifierAttributes(variant: ListingDraftVariant): MercadoLibreAttributeInput[] {
-  return [
+const GRAMS_PER_KILOGRAM = 1000;
+const WEIGHT_KG_DECIMALS = 2;
+
+/** What identifies a variant: SKU, GTIN, and real package weight when present and accepted. */
+export function identifierAttributes(
+  variant: ListingDraftVariant,
+  index?: MercadoLibreAttributeIndex,
+): MercadoLibreAttributeInput[] {
+  const attributes: MercadoLibreAttributeInput[] = [
     ...(variant.sku ? [{ id: MercadoLibreAttributeId.SellerSku, value_name: variant.sku }] : []),
     ...(variant.barcode ? [{ id: MercadoLibreAttributeId.Gtin, value_name: variant.barcode }] : []),
   ];
+  if (
+    variant.weightGrams &&
+    variant.weightGrams > 0 &&
+    index?.byAttributeId(MercadoLibreAttributeId.PackageWeight)
+  ) {
+    const value =
+      variant.weightGrams >= GRAMS_PER_KILOGRAM
+        ? `${Number((variant.weightGrams / GRAMS_PER_KILOGRAM).toFixed(WEIGHT_KG_DECIMALS))} kg`
+        : `${Math.round(variant.weightGrams)} g`;
+    attributes.push({ id: MercadoLibreAttributeId.PackageWeight, value_name: value });
+  }
+  return attributes;
 }
 
 /** Names of the category's required attributes the listing would be sent without. */

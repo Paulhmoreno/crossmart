@@ -4,6 +4,7 @@ import { MercadoLibreItemStatus } from '../mercadolibre.enums.js';
 import { mercadoLibreError } from '../mercadolibre-errors.js';
 import { MercadoLibreItemClient } from './mercadolibre-item.client.js';
 import type { MercadoLibreItem } from './mercadolibre-item.types.js';
+import { isMercadoLibreItemLive } from './mercadolibre-item.verifier.js';
 
 export const LISTING_GONE =
   'This listing was closed or removed on Mercado Libre. Remove it here and publish it again.';
@@ -34,9 +35,9 @@ export class MercadoLibreItemLifecycle {
     quantity: number,
   ): Promise<boolean> {
     const target = targetStatus(item.status, wantsActive, quantity);
-    if (!target) return item.status === MercadoLibreItemStatus.Active;
+    if (!target) return isMercadoLibreItemLive(item);
     const updated = await this.items.setStatus(accessToken, item.id, target);
-    return updated.status === MercadoLibreItemStatus.Active;
+    return isMercadoLibreItemLive(updated);
   }
 
   /** Closes each open item; ones already closed or gone are left as they are. */

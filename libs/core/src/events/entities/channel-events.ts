@@ -5,7 +5,16 @@ export interface OrderChangedEvent {
   externalOrderId: string;
 }
 
-/** Reacts to channel events, such as by reading the order. Handlers must not throw. */
+/** A channel said one of a connection's listings changed remotely (status or moderation). */
+export interface ListingChangedEvent {
+  workspaceId: string;
+  connectionId: string;
+  externalListingId: string;
+  topic: string;
+}
+
+/** Reacts to channel events, such as by reading the order or listing. Handlers must not throw. */
 export interface ChannelEventListener {
-  onOrderChanged(event: OrderChangedEvent): Promise<void>;
+  onOrderChanged?(event: OrderChangedEvent): Promise<void>;
+  onListingChanged?(event: ListingChangedEvent): Promise<void>;
 }

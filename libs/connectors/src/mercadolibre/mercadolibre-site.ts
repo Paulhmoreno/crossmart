@@ -3,6 +3,7 @@
  * account belongs to one site, which `GET /users/me` names as `site_id`.
  */
 export enum MercadoLibreSiteId {
+  Ecuador = 'MEC',
   Mexico = 'MLM',
   Chile = 'MLC',
   Colombia = 'MCO',
@@ -26,6 +27,12 @@ export interface MercadoLibreSite {
 }
 
 export const MERCADOLIBRE_SITES: Readonly<Record<MercadoLibreSiteId, MercadoLibreSite>> = {
+  [MercadoLibreSiteId.Ecuador]: {
+    currencyCode: 'USD',
+    currencyDecimals: 2,
+    siteLabel: 'Mercado Libre Ecuador',
+    authOrigin: 'https://auth.mercadolibre.com.ec',
+  },
   [MercadoLibreSiteId.Mexico]: {
     currencyCode: 'MXN',
     currencyDecimals: 2,

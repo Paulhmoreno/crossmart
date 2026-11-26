@@ -6,10 +6,20 @@ import {
 
 describe('Mercado Libre sites', () => {
   it('normalizes a site id the merchant picked, in any case', () => {
+    expect(normalizeMercadoLibreSiteId(' mec ')).toBe(MercadoLibreSiteId.Ecuador);
     expect(normalizeMercadoLibreSiteId(' mlm ')).toBe(MercadoLibreSiteId.Mexico);
     expect(normalizeMercadoLibreSiteId('MLB')).toBe(MercadoLibreSiteId.Brazil);
     expect(normalizeMercadoLibreSiteId('MLX')).toBeNull();
     expect(normalizeMercadoLibreSiteId('EBAY_US')).toBeNull();
+  });
+
+  it('configures Ecuador (MEC) in USD with 2 decimals and auth.mercadolibre.com.ec', () => {
+    expect(MERCADOLIBRE_SITES[MercadoLibreSiteId.Ecuador]).toEqual({
+      currencyCode: 'USD',
+      currencyDecimals: 2,
+      siteLabel: 'Mercado Libre Ecuador',
+      authOrigin: 'https://auth.mercadolibre.com.ec',
+    });
   });
 
   it('prices Chile and Colombia in whole pesos, as /currencies says', () => {

@@ -10,6 +10,8 @@ export enum ChannelWebhookKind {
   AccountRedactionRequested = 'account_redaction_requested',
   /** An order was placed, edited, paid, fulfilled or cancelled; `resourceId` names it. */
   OrderChanged = 'order_changed',
+  /** A listing changed remotely (status, price, stock, or moderation); `resourceId` names it. */
+  ListingChanged = 'listing_changed',
   /** A topic this version of Crossmart does not handle; acknowledged and ignored. */
   Unhandled = 'unhandled',
 }

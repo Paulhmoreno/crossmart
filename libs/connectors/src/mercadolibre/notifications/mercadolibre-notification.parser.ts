@@ -7,6 +7,8 @@ import {
 } from '../../sdk/capabilities/webhook-receiver.js';
 import { parseJsonBody } from '../../sdk/http/parse-json.js';
 import {
+  MERCADOLIBRE_ITEM_RESOURCE_PATTERN,
+  MERCADOLIBRE_MODERATION_RESOURCE_PATTERN,
   MERCADOLIBRE_NUMERIC_ID_PATTERN,
   MERCADOLIBRE_ORDER_RESOURCE_PATTERN,
 } from '../mercadolibre.constants.js';
@@ -36,11 +38,24 @@ function orderIdOf(notification: Notification): string | undefined {
   return MERCADOLIBRE_ORDER_RESOURCE_PATTERN.exec(notification.resource)?.[1];
 }
 
+/** The item an `items`, `items_prices`, or `moderations` notification is about. */
+function itemIdOf(notification: Notification): string | undefined {
+  if (
+    notification.topic === MercadoLibreTopic.Items ||
+    notification.topic === MercadoLibreTopic.ItemsPrices
+  ) {
+    return MERCADOLIBRE_ITEM_RESOURCE_PATTERN.exec(notification.resource)?.[1]?.toUpperCase();
+  }
+  if (notification.topic === MercadoLibreTopic.Moderations) {
+    return MERCADOLIBRE_MODERATION_RESOURCE_PATTERN.exec(notification.resource)?.[1]?.toUpperCase();
+  }
+  return undefined;
+}
+
 /**
  * Reads Mercado Libre notifications. They carry no signature: a notification is accepted only
- * when it is for this instance's app, and it is a hint, never data. An `orders_v2` one makes
- * Crossmart read the order with the seller's own token, which only works for an order of that
- * seller; every other topic is acknowledged and ignored.
+ * when it is for this instance's app, and it is a hint, never data. `orders_v2`, `items`,
+ * `items_prices`, and `moderations` trigger authenticated resource lookups with the seller's token.
  */
 @Injectable()
 export class MercadoLibreNotificationParser {
@@ -53,13 +68,20 @@ export class MercadoLibreNotificationParser {
     if (!parsed.success || parsed.data.application_id !== this.app.appId) return null;
     const notification = parsed.data;
     const orderId = orderIdOf(notification);
+    const itemId = orderId ? undefined : itemIdOf(notification);
+    const kind = orderId
+      ? ChannelWebhookKind.OrderChanged
+      : itemId
+        ? ChannelWebhookKind.ListingChanged
+        : ChannelWebhookKind.Unhandled;
+    const resourceId = orderId ?? itemId;
     return {
-      kind: orderId ? ChannelWebhookKind.OrderChanged : ChannelWebhookKind.Unhandled,
+      kind,
       topic: notification.topic,
       externalAccountId: notification.user_id,
       deliveryId: notification._id,
       payload: notification,
-      ...(orderId ? { resourceId: orderId } : {}),
+      ...(resourceId ? { resourceId } : {}),
     };
   }
 }

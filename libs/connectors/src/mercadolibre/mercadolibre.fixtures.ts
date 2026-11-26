@@ -1,6 +1,7 @@
 import type { ChannelSession } from '../sdk/auth/channel-session.js';
 import type { ListingDraft, ListingDraftVariant } from '../sdk/capabilities/listing-publisher.js';
 import { ChannelType } from '../sdk/channel-type.enum.js';
+import { FakeImageFetcher } from '../sdk/images/fake-image-fetcher.js';
 import { FakeHttpTransport } from '../sdk/testing/fake-http-transport.js';
 import { loadFixture } from '../sdk/testing/fixtures.js';
 import { MercadoLibreUserReader } from './account/mercadolibre-user.reader.js';
@@ -17,10 +18,13 @@ import { MercadoLibreSiteId } from './mercadolibre-site.js';
 import { MercadoLibreNotificationParser } from './notifications/mercadolibre-notification.parser.js';
 import { MercadoLibreOAuthClient } from './oauth/mercadolibre-oauth.client.js';
 import { MercadoLibreOrderSource } from './orders/mercadolibre-order-source.js';
+import { MercadoLibreCatalogMatcher } from './publish/mercadolibre-catalog.matcher.js';
 import { MercadoLibreItemClient } from './publish/mercadolibre-item.client.js';
 import { MercadoLibreItemLifecycle } from './publish/mercadolibre-item-lifecycle.js';
+import { MercadoLibreItemVerifier } from './publish/mercadolibre-item.verifier.js';
 import { MercadoLibreListingWriters } from './publish/mercadolibre-listing-writers.js';
 import { MercadoLibreListingPublisher } from './publish/mercadolibre-listing-publisher.js';
+import { MercadoLibreMediaUploader } from './publish/mercadolibre-media.uploader.js';
 import { MercadoLibrePriceUpdater } from './publish/mercadolibre-price-updater.js';
 import { MercadoLibreSingleItemWriter } from './publish/mercadolibre-single-item.writer.js';
 import { MercadoLibreUserProductWriter } from './publish/mercadolibre-user-product.writer.js';
@@ -41,6 +45,8 @@ export const API = 'https://api.mercadolibre.com';
 export const TOKEN_URL = `${API}/oauth/token`;
 export const ME_URL = `${API}/users/me`;
 export const ITEMS_URL = `${API}/items`;
+export const VALIDATE_ITEMS_URL = `${API}/items/validate`;
+export const PICTURES_UPLOAD_URL = `${API}/pictures/items/upload`;
 export const ACCESS_TOKEN = 'APP_USR-123456-090515-8cc4448aac10d5105474e1351-1234567';
 export const CATEGORY = { id: 'MLA1055', name: 'Celulares y Teléfonos > Celulares y Smartphones' };
 export const CATEGORY_URL = `${API}/categories/MLA1055`;
@@ -141,6 +147,7 @@ export interface MercadoLibreTestKit {
   http: FakeHttpTransport;
   oauth: MercadoLibreOAuthClient;
   connector: MercadoLibreConnector;
+  imageFetcher: FakeImageFetcher;
 }
 
 /** A connector wired to fakes, as the Nest module wires the real one. */
@@ -148,18 +155,23 @@ export function createMercadoLibreTestKit(
   app = new MercadoLibreApp(TEST_APP),
 ): MercadoLibreTestKit {
   const http = new FakeHttpTransport();
+  const imageFetcher = new FakeImageFetcher();
   const oauth = new MercadoLibreOAuthClient(app, http);
   const api = new MercadoLibreApiClient(http);
   const items = new MercadoLibreItemClient(api);
   const lifecycle = new MercadoLibreItemLifecycle(items);
+  const verifier = new MercadoLibreItemVerifier(items);
+  const catalog = new MercadoLibreCatalogMatcher(api);
+  const media = new MercadoLibreMediaUploader(http, imageFetcher);
   const categories = new MercadoLibreCategoryReader(api);
   const attributes = new MercadoLibreCategoryAttributesReader(api);
   const publisher = new MercadoLibreListingPublisher(
     categories,
     attributes,
+    media,
     new MercadoLibreListingWriters(
-      new MercadoLibreSingleItemWriter(items, lifecycle),
-      new MercadoLibreUserProductWriter(items, lifecycle),
+      new MercadoLibreSingleItemWriter(items, lifecycle, catalog, verifier),
+      new MercadoLibreUserProductWriter(items, lifecycle, verifier),
     ),
     lifecycle,
   );
@@ -175,5 +187,10 @@ export function createMercadoLibreTestKit(
     new MercadoLibreInventorySync(items, lifecycle),
     new MercadoLibreNotificationParser(app),
   );
-  return { http, oauth, connector: new MercadoLibreConnector(app, oauth, selling, sync) };
+  return {
+    http,
+    oauth,
+    imageFetcher,
+    connector: new MercadoLibreConnector(app, oauth, selling, sync),
+  };
 }

@@ -25,13 +25,44 @@ describe('Mercado Libre notifications', () => {
     });
   });
 
-  it('acknowledges other topics of the app without acting on them', () => {
+  it('reads items and moderations notifications as ListingChanged with the item id', () => {
     const { connector } = createMercadoLibreTestKit();
     const item = { ...fixtureJson('notification-item.json'), application_id: '5503910054141466' };
+    const moderation = {
+      _id: 'mod-1',
+      resource: '/moderations/items/MEC123456789',
+      user_id: '123456789',
+      topic: 'moderations',
+      application_id: '5503910054141466',
+    };
 
     expect(connector.verifyWebhook(webhook(item))).toMatchObject({
-      kind: ChannelWebhookKind.Unhandled,
+      kind: ChannelWebhookKind.ListingChanged,
       topic: 'items',
+      externalAccountId: '123456789',
+      resourceId: expect.stringMatching(/^[A-Z]{2,4}\d+$/) as string,
+    });
+    expect(connector.verifyWebhook(webhook(moderation))).toMatchObject({
+      kind: ChannelWebhookKind.ListingChanged,
+      topic: 'moderations',
+      externalAccountId: '123456789',
+      resourceId: 'MEC123456789',
+    });
+  });
+
+  it('acknowledges unhandled topics of the app without acting on them', () => {
+    const { connector } = createMercadoLibreTestKit();
+    const question = {
+      _id: 'q-1',
+      resource: '/questions/998877',
+      user_id: '123456789',
+      topic: 'questions',
+      application_id: '5503910054141466',
+    };
+
+    expect(connector.verifyWebhook(webhook(question))).toMatchObject({
+      kind: ChannelWebhookKind.Unhandled,
+      topic: 'questions',
       externalAccountId: '123456789',
     });
   });

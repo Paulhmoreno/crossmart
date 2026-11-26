@@ -1,7 +1,9 @@
 import type { ListingDraft } from '../../sdk/capabilities/listing-publisher.js';
 import type { ChannelCategory } from '../../sdk/capabilities/taxonomy-provider.js';
 import type { MercadoLibreSettings } from '../mercadolibre-settings.js';
+import type { MercadoLibreCategory } from '../taxonomy/mercadolibre-taxonomy.types.js';
 import type { MercadoLibreAttributeIndex } from './mercadolibre-attributes.js';
+import type { MercadoLibrePictureInput } from './mercadolibre-item.types.js';
 
 /** Everything one listing write needs, resolved before the first write to Mercado Libre. */
 export interface MercadoLibreListingPlan {
@@ -9,6 +11,8 @@ export interface MercadoLibreListingPlan {
   draft: ListingDraft;
   settings: MercadoLibreSettings;
   category: ChannelCategory;
+  categoryDetails?: MercadoLibreCategory;
+  pictures?: MercadoLibrePictureInput[];
   attributes: MercadoLibreAttributeIndex;
 }
 

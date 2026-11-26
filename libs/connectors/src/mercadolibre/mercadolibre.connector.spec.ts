@@ -64,6 +64,12 @@ describe('MercadoLibreConnector', () => {
   it('signs the seller in on their country’s site, with the PKCE challenge', () => {
     const { connector } = createMercadoLibreTestKit();
 
+    const ecuador = connector.authorizationUrl({
+      accountHandle: 'MEC',
+      state: 'signed-state',
+      redirectUri: REDIRECT_URI,
+      codeVerifier: VERIFIER,
+    });
     const chile = connector.authorizationUrl({
       accountHandle: 'MLC',
       state: 'signed-state',
@@ -76,6 +82,9 @@ describe('MercadoLibreConnector', () => {
       redirectUri: REDIRECT_URI,
     });
 
+    expect(ecuador.origin + ecuador.pathname).toBe(
+      'https://auth.mercadolibre.com.ec/authorization',
+    );
     expect(chile.origin + chile.pathname).toBe('https://auth.mercadolibre.cl/authorization');
     expect(Object.fromEntries(chile.searchParams)).toEqual({
       response_type: 'code',
@@ -188,9 +197,16 @@ describe('MercadoLibreConnector', () => {
   });
 
   describe('describeAccount', () => {
-    it('reads the seller, their site and currency', async () => {
+    it('reads the seller, their site, currency, and available listing types', async () => {
       const { connector, http } = createMercadoLibreTestKit();
-      http.expect(HttpMethod.Get, ME_URL, fixtureResponse(FIXTURES, 'user-me.json'));
+      http.expect(HttpMethod.Get, ME_URL, fixtureResponse(FIXTURES, 'user-me.json')).expect(
+        HttpMethod.Get,
+        `${API}/sites/MLA/listing_types`,
+        jsonResponse([
+          { id: 'gold_special', name: 'Clásica' },
+          { id: 'gold_pro', name: 'Premium' },
+        ]),
+      );
 
       const profile = await connector.describeAccount(mercadoLibreSession());
 
@@ -204,6 +220,11 @@ describe('MercadoLibreConnector', () => {
           currencyCode: 'ARS',
           permalink: 'http://perfil.mercadolibre.com.ar/TETE2870021',
           userProductSeller: false,
+          availableListingTypes: [
+            { id: 'gold_special', name: 'Clásica' },
+            { id: 'gold_pro', name: 'Premium' },
+          ],
+          importOrders: false,
         },
       });
       expect(connector.parseSettings(profile.settings)).toEqual(profile.settings);

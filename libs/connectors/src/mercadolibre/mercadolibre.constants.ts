@@ -31,12 +31,17 @@ export enum MercadoLibrePathParam {
 
 export const MERCADOLIBRE_ME_PATH = '/users/me';
 export const MERCADOLIBRE_GRANT_PATH = '/users/{user_id}/applications/{app_id}';
+export const MERCADOLIBRE_SITE_LISTING_TYPES_PATH = '/sites/{site_id}/listing_types';
 export const MERCADOLIBRE_DOMAIN_DISCOVERY_PATH = '/sites/{site_id}/domain_discovery/search';
 export const MERCADOLIBRE_CATEGORY_PATH = '/categories/{category_id}';
 export const MERCADOLIBRE_CATEGORY_ATTRIBUTES_PATH = '/categories/{category_id}/attributes';
 export const MERCADOLIBRE_ITEMS_PATH = '/items';
+export const MERCADOLIBRE_ITEMS_VALIDATE_PATH = '/items/validate';
 export const MERCADOLIBRE_ITEM_PATH = '/items/{item_id}';
 export const MERCADOLIBRE_ITEM_DESCRIPTION_PATH = '/items/{item_id}/description';
+export const MERCADOLIBRE_PICTURES_UPLOAD_PATH = '/pictures/items/upload';
+export const MERCADOLIBRE_USER_ITEMS_SEARCH_PATH = '/users/{user_id}/items/search';
+export const MERCADOLIBRE_CATALOG_SEARCH_PATH = '/products/search';
 export const MERCADOLIBRE_ORDERS_SEARCH_PATH = '/orders/search';
 export const MERCADOLIBRE_ORDER_PATH = '/orders/{order_id}';
 
@@ -46,6 +51,10 @@ export enum MercadoLibreQueryParam {
   Limit = 'limit',
   Offset = 'offset',
   Seller = 'seller',
+  SellerSku = 'seller_sku',
+  SiteId = 'site_id',
+  Status = 'status',
+  ProductIdentifier = 'product_identifier',
   Sort = 'sort',
   LastUpdatedFrom = 'order.date_last_updated.from',
   ApiVersion = 'api_version',
@@ -87,8 +96,21 @@ export const MERCADOLIBRE_DEFAULT_LISTING_TYPE = MercadoLibreListingType.Classic
 /** Item attributes Crossmart fills itself (the Attributes and Product identifiers guides). */
 export enum MercadoLibreAttributeId {
   Brand = 'BRAND',
+  Model = 'MODEL',
   Gtin = 'GTIN',
+  EmptyGtinReason = 'EMPTY_GTIN_REASON',
   SellerSku = 'SELLER_SKU',
+  ItemCondition = 'ITEM_CONDITION',
+  PackageWeight = 'SELLER_PACKAGE_WEIGHT',
+  PackageLength = 'SELLER_PACKAGE_LENGTH',
+  PackageWidth = 'SELLER_PACKAGE_WIDTH',
+  PackageHeight = 'SELLER_PACKAGE_HEIGHT',
+}
+
+/** Sale term ids for commercial warranty terms (`sale_terms`). */
+export enum MercadoLibreSaleTermId {
+  WarrantyType = 'WARRANTY_TYPE',
+  WarrantyTime = 'WARRANTY_TIME',
 }
 
 /** `/users` tag of sellers who list under User Products ("Precio por variación"). */
@@ -119,5 +141,19 @@ export const MERCADOLIBRE_NUMERIC_ID_PATTERN = /^[1-9]\d*$/;
 
 /** `resource` of an `orders_v2` notification: `/orders/{order id}`. */
 export const MERCADOLIBRE_ORDER_RESOURCE_PATTERN = /^\/orders\/(\d+)$/;
+/** `resource` of an `items` or `items_prices` notification: `/items/{item id}` (e.g. `MEC123456`). */
+export const MERCADOLIBRE_ITEM_RESOURCE_PATTERN = /^\/items\/([A-Z]{2,4}\d+)$/i;
+/** `resource` of a moderation notification carrying an item id. */
+export const MERCADOLIBRE_MODERATION_RESOURCE_PATTERN = /([A-Z]{2,4}\d+)/i;
+/** Sub-statuses that mean Mercado Libre moderated, paused, or blocked the listing. */
+export const MERCADOLIBRE_BLOCKING_SUB_STATUSES: ReadonlySet<string> = new Set([
+  'suspended',
+  'forbidden',
+  'held',
+  'waiting_for_patch',
+  'deleted',
+  'banned',
+  'picture_download_pending',
+]);
 /** The name a merchant and buyer see for an order. */
 export const MERCADOLIBRE_ORDER_NAME_PREFIX = '#';

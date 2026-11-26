@@ -1,8 +1,31 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { type MercadoLibreSettings, MercadoLibreSiteId } from '@crossmart/connectors';
-import { MERCADOLIBRE_SITE_ID_SCHEMA_NAME } from '../channels.constants.js';
+import {
+  type MercadoLibreListingTypeOption,
+  type MercadoLibreSettings,
+  MercadoLibreShippingMode,
+  MercadoLibreSiteId,
+} from '@crossmart/connectors';
+import {
+  MERCADOLIBRE_SHIPPING_MODE_SCHEMA_NAME,
+  MERCADOLIBRE_SITE_ID_SCHEMA_NAME,
+} from '../channels.constants.js';
 
-/** What Crossmart read about the Mercado Libre seller on connect. */
+export class MercadoLibreListingTypeOptionDto {
+  @ApiProperty({ example: 'gold_special' })
+  id: string;
+
+  @ApiProperty({ example: 'Clásica' })
+  name: string;
+
+  static from(option: MercadoLibreListingTypeOption): MercadoLibreListingTypeOptionDto {
+    return Object.assign(new MercadoLibreListingTypeOptionDto(), {
+      id: option.id,
+      name: option.name,
+    });
+  }
+}
+
+/** What Crossmart read about the Mercado Libre seller and their commercial listing setup. */
 export class MercadoLibreSettingsDto {
   @ApiProperty({ example: '1008002397', description: 'The seller’s Mercado Libre user id' })
   userId: string;
@@ -17,13 +40,13 @@ export class MercadoLibreSettingsDto {
   })
   siteId: MercadoLibreSiteId;
 
-  @ApiProperty({ example: 'MXN', description: 'ISO 4217 code of the site’s currency' })
+  @ApiProperty({ example: 'USD', description: 'ISO 4217 code of the site’s currency' })
   currencyCode: string;
 
   @ApiProperty({
     type: String,
     nullable: true,
-    example: 'http://perfil.mercadolibre.com.mx/TESTSELLER',
+    example: 'https://perfil.mercadolibre.com.ec/TESTSELLER',
   })
   permalink: string | null;
 
@@ -33,6 +56,56 @@ export class MercadoLibreSettingsDto {
   })
   userProductSeller: boolean;
 
+  @ApiProperty({
+    type: [MercadoLibreListingTypeOptionDto],
+    description: 'Available listing types read from Mercado Libre for this site',
+  })
+  availableListingTypes: MercadoLibreListingTypeOptionDto[];
+
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    example: 'gold_special',
+    description: 'Default listing type id for new publications',
+  })
+  defaultListingTypeId: string | null;
+
+  @ApiProperty({
+    enum: MercadoLibreShippingMode,
+    enumName: MERCADOLIBRE_SHIPPING_MODE_SCHEMA_NAME,
+    nullable: true,
+    description: 'Shipping mode override; null lets Mercado Libre apply account defaults',
+  })
+  shippingMode: MercadoLibreShippingMode | null;
+
+  @ApiProperty({
+    type: Boolean,
+    nullable: true,
+    description: 'Allow local pickup when supported by the site and category',
+  })
+  localPickUp: boolean | null;
+
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    example: 'Garantía del vendedor',
+    description: 'Commercial warranty type sent in sale_terms when set',
+  })
+  warrantyType: string | null;
+
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    example: '6 meses',
+    description: 'Commercial warranty duration sent in sale_terms when set',
+  })
+  warrantyTime: string | null;
+
+  @ApiProperty({
+    description: 'Whether orders from this Mercado Libre store are imported into Crossmart',
+  })
+  importOrders: boolean;
+
   static from(settings: MercadoLibreSettings): MercadoLibreSettingsDto {
     return Object.assign(new MercadoLibreSettingsDto(), {
       userId: settings.userId,
@@ -41,6 +114,15 @@ export class MercadoLibreSettingsDto {
       currencyCode: settings.currencyCode,
       permalink: settings.permalink,
       userProductSeller: settings.userProductSeller,
+      availableListingTypes: (settings.availableListingTypes ?? []).map((option) =>
+        MercadoLibreListingTypeOptionDto.from(option),
+      ),
+      defaultListingTypeId: settings.defaultListingTypeId ?? null,
+      shippingMode: settings.shippingMode ?? null,
+      localPickUp: settings.localPickUp ?? null,
+      warrantyType: settings.warrantyType ?? null,
+      warrantyTime: settings.warrantyTime ?? null,
+      importOrders: settings.importOrders ?? false,
     });
   }
 }

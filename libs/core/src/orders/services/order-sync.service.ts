@@ -7,10 +7,12 @@ import {
   ChannelFeature,
   type ChannelSession,
   ChannelType,
+  isMercadoLibreSettings,
   type OrderSource,
   supportsCapability,
 } from '@crossmart/connectors';
 import { ChannelConnectionStatus } from '@crossmart/database';
+import { parseConnectionSettings } from '../../channels/entities/connection-settings.js';
 import type { ChannelConnectionRecord } from '../../channels/repositories/channel-connection.queries.js';
 import { ChannelConnectionRepository } from '../../channels/repositories/channel-connection.repository.js';
 import { ChannelSessionFactory } from '../../channels/services/channel-session.factory.js';
@@ -106,6 +108,9 @@ export class OrderSyncService {
     if (!connector || !supportsCapability(connector, ChannelCapability.FetchOrders)) return null;
     // Until the merchant grants reading orders, none are read, so the sync has not started.
     if (lacksOrderScope(connector, record.grantedScopes)) return null;
+    // Mercado Libre order import stays off by default until reconciled with Odoo as inventory master.
+    const { account } = parseConnectionSettings(connector, record.settings);
+    if (account && isMercadoLibreSettings(account) && account.importOrders !== true) return null;
     const syncedFrom =
       record.ordersSyncedFrom ??
       (await this.connections.startOrderSync(record.workspaceId, record.id, new Date()));

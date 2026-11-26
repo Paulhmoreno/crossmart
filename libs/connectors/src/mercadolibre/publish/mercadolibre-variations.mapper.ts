@@ -45,12 +45,15 @@ export function toVariation(
   price: number,
 ): MercadoLibreVariationInput {
   const variationId = variationIdOf(variant);
-  const pictureIds = listingPictures(plan.draft).map((picture) => picture.source);
-  const pictures = changedPictures(plan.draft).pictures ? { picture_ids: pictureIds } : {};
+  const resolved = plan.pictures ?? listingPictures(plan.draft, plan.categoryDetails);
+  const pictureIds = resolved.map((picture) => ('id' in picture ? picture.id : picture.source));
+  const pictures = changedPictures(plan.draft, resolved).pictures
+    ? { picture_ids: pictureIds }
+    : {};
   const common = {
     price,
     available_quantity: listedQuantity(variant),
-    attributes: identifierAttributes(variant),
+    attributes: identifierAttributes(variant, plan.attributes),
   };
   if (variationId !== null) return { id: variationId, ...common, ...pictures };
   return {
