@@ -108,6 +108,7 @@ describe('SalesAgentService Chatwoot webhook pipeline', () => {
       salesConversation: {
         findFirst: vi.fn().mockResolvedValue({ id: 'sconv-1' }),
         create: vi.fn().mockResolvedValue({ id: 'sconv-1' }),
+        update: vi.fn().mockResolvedValue({ id: 'sconv-1' }),
       },
       salesMessage: {
         create: vi.fn().mockResolvedValue({ id: 'smsg-1' }),
@@ -181,14 +182,26 @@ describe('SalesAgentService Chatwoot webhook pipeline', () => {
           accountId: 1,
           status: ChatwootConnectionStatus.CONNECTED,
         },
-        credentials: { apiAccessToken: 'admin-tok', agentBotToken: 'bot-tok', webhookSecret: null },
+        credentials: {
+          apiAccessToken: 'admin-tok',
+          agentBotToken: 'bot-tok',
+          webhookSecret: 'test-secret',
+        },
       }),
+    };
+    const knowledge = {
+      getApplicableKnowledge: vi.fn().mockResolvedValue([]),
+      recordEvent: vi.fn().mockResolvedValue({}),
+      listEntries: vi.fn().mockResolvedValue([]),
+      listProposals: vi.fn().mockResolvedValue([]),
+      listEvents: vi.fn().mockResolvedValue([]),
     };
     const service = new SalesAgentService(
       prisma as never,
       ai as never,
       configs as never,
       tools as never,
+      knowledge as never,
       chatwootConns as never,
       { sendMessage, toggleConversationStatus, getConversation } as never,
     );
@@ -210,40 +223,52 @@ describe('SalesAgentService Chatwoot webhook pipeline', () => {
     const { service, sendMessage } = makeService({ salesMode: SalesAgentMode.AUTOMATIC });
 
     // Outgoing bot message ignored
-    const loop = await service.handleChatwootWebhook(CONN_ID, {
-      ...incomingPayload,
-      message_type: 'outgoing',
-    });
+    const loop = await service.handleChatwootWebhook(
+      CONN_ID,
+      {
+        ...incomingPayload,
+        message_type: 'outgoing',
+      },
+      'test-secret',
+    );
     expect(loop.outcome).toBe('ignored');
     expect(sendMessage).not.toHaveBeenCalled();
 
     // Duplicate event ignored
     const dupKit = makeService({ salesMode: SalesAgentMode.AUTOMATIC, duplicate: true });
-    const dup = await dupKit.service.handleChatwootWebhook(CONN_ID, incomingPayload);
+    const dup = await dupKit.service.handleChatwootWebhook(CONN_ID, incomingPayload, 'test-secret');
     expect(dup.outcome).toBe('duplicate');
     expect(dupKit.sendMessage).not.toHaveBeenCalled();
 
     // Disabled mode ignored
     const disKit = makeService({ salesMode: SalesAgentMode.DISABLED });
-    const dis = await disKit.service.handleChatwootWebhook(CONN_ID, incomingPayload);
+    const dis = await disKit.service.handleChatwootWebhook(CONN_ID, incomingPayload, 'test-secret');
     expect(dis).toMatchObject({ outcome: 'ignored', detail: 'mode_disabled' });
     expect(disKit.sendMessage).not.toHaveBeenCalled();
 
     // Live human assignment blocks sending even in AUTOMATIC mode
     const humanKit = makeService({ salesMode: SalesAgentMode.AUTOMATIC, liveAssigneeId: 99 });
-    const human = await humanKit.service.handleChatwootWebhook(CONN_ID, incomingPayload);
+    const human = await humanKit.service.handleChatwootWebhook(
+      CONN_ID,
+      incomingPayload,
+      'test-secret',
+    );
     expect(human).toMatchObject({ outcome: 'ignored', detail: 'assigned_to_human_live' });
     expect(humanKit.sendMessage).not.toHaveBeenCalled();
   });
 
   it('sends private notes in SUPERVISED mode and public reply + handoff toggle in AUTOMATIC mode', async () => {
     const sup = makeService({ salesMode: SalesAgentMode.SUPERVISED });
-    const supRes = await sup.service.handleChatwootWebhook(CONN_ID, incomingPayload);
+    const supRes = await sup.service.handleChatwootWebhook(CONN_ID, incomingPayload, 'test-secret');
     expect(supRes.outcome).toBe('supervised_draft');
     expect(sup.sendMessage).toHaveBeenCalledWith(expect.objectContaining({ isPrivate: true }));
 
     const autoHandoff = makeService({ salesMode: SalesAgentMode.AUTOMATIC, handoff: true });
-    const handoffRes = await autoHandoff.service.handleChatwootWebhook(CONN_ID, incomingPayload);
+    const handoffRes = await autoHandoff.service.handleChatwootWebhook(
+      CONN_ID,
+      incomingPayload,
+      'test-secret',
+    );
     expect(handoffRes.outcome).toBe('handoff');
     expect(autoHandoff.sendMessage).toHaveBeenCalledWith(
       expect.objectContaining({ isPrivate: false }),

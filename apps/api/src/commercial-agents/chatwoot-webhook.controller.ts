@@ -38,6 +38,7 @@ export class ChatwootWebhookController {
       connectionId,
       payload,
       headerSecret ?? querySecret ?? null,
+      { asyncProcessing: true },
     );
   }
 }

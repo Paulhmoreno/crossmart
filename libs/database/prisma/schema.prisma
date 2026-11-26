@@ -359,6 +359,9 @@ model Workspace {
   chatwootConnections      ChatwootConnection[]
   agentConfigs             WorkspaceAgentConfig[]
   salesConversations       SalesConversation[]
+  salesKnowledgeEntries    SalesKnowledgeEntry[]
+  salesLearningProposals   SalesLearningProposal[]
+  salesEvents              SalesEvent[]
   createdAt                DateTime                  @default(now()) @map("created_at")
   updatedAt                DateTime                  @updatedAt @map("updated_at")
 
@@ -2099,16 +2102,22 @@ model WorkspaceAgentConfig {
   @@map("workspace_agent_configs")
 }
 
-/// Isolated conversations for the Sales Agent (simulator and Chatwoot trace, separate from Crossmart Agent).
+/// Isolated conversations for the Sales Agent (supervisor, simulator, and Chatwoot trace).
 model SalesConversation {
   id               String         @id @default(uuid(7)) @db.Uuid
   workspaceId      String         @map("workspace_id") @db.Uuid
   workspace        Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   userId           String?        @map("user_id") @db.Uuid
   user             User?          @relation(fields: [userId], references: [id], onDelete: SetNull)
-  /// `simulator` | `chatwoot`
+  /// `supervisor` | `simulator` | `chatwoot`
   source           String         @default("simulator")
   externalRef      String?        @map("external_ref")
+  channelType      String?        @map("channel_type")
+  inboxId          Int?           @map("inbox_id")
+  inboxName        String?        @map("inbox_name")
+  contactName      String?        @map("contact_name")
+  /// Normalized channel/commercial context (listingId, productRef, sku, platformMetadata).
+  context          Json           @default("{}")
   title            String
   handoffRequested Boolean        @default(false) @map("handoff_requested")
   handoffReason    String?        @map("handoff_reason")
@@ -2116,7 +2125,7 @@ model SalesConversation {
   createdAt        DateTime       @default(now()) @map("created_at")
   updatedAt        DateTime       @updatedAt @map("updated_at")
 
-  @@index([workspaceId, updatedAt(sort: Desc)])
+  @@index([workspaceId, source, updatedAt(sort: Desc)])
   @@map("sales_conversations")
 }
 
@@ -2124,7 +2133,7 @@ model SalesMessage {
   id             String            @id @default(uuid(7)) @db.Uuid
   conversationId String            @map("conversation_id") @db.Uuid
   conversation   SalesConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-  /// `buyer` | `assistant` | `private_draft` | `system`
+  /// `supervisor` | `buyer` | `assistant` | `private_draft` | `system`
   role           String
   text           String
   metadata       Json              @default("{}")
@@ -2132,4 +2141,84 @@ model SalesMessage {
 
   @@index([conversationId, createdAt])
   @@map("sales_messages")
+}
+
+enum SalesKnowledgeStatus {
+  ACTIVE
+  ARCHIVED
+
+  @@map("sales_knowledge_status")
+}
+
+/// Approved, versioned commercial knowledge entries (global or per-channel), provider-independent.
+model SalesKnowledgeEntry {
+  id           String               @id @default(uuid(7)) @db.Uuid
+  workspaceId  String               @map("workspace_id") @db.Uuid
+  workspace    Workspace            @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  /// `business_info` | `location_hours` | `delivery_coverage` | `payment_methods` | `warranties` | `discounts` | `channel_policies` | `service_style` | `faq`
+  category     String
+  /// `global` or `channel:<slug>` (e.g. `channel:web_widget`, `channel:marketplace`, `channel:whatsapp`)
+  scope        String               @default("global")
+  title        String
+  content      String
+  status       SalesKnowledgeStatus @default(ACTIVE)
+  source       String               @default("supervisor")
+  version      Int                  @default(1)
+  approvedById String?              @map("approved_by_id") @db.Uuid
+  approvedAt   DateTime             @default(now()) @map("approved_at")
+  createdAt    DateTime             @default(now()) @map("created_at")
+  updatedAt    DateTime             @updatedAt @map("updated_at")
+
+  @@index([workspaceId, status, scope])
+  @@map("sales_knowledge_entries")
+}
+
+enum SalesLearningStatus {
+  PENDING
+  APPROVED
+  REJECTED
+
+  @@map("sales_learning_status")
+}
+
+/// Human-reviewed learning proposals generated from supervisor chat or simulation/conversation corrections.
+model SalesLearningProposal {
+  id                   String              @id @default(uuid(7)) @db.Uuid
+  workspaceId          String              @map("workspace_id") @db.Uuid
+  workspace            Workspace           @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  category             String
+  scope                String              @default("global")
+  title                String
+  proposedContent      String              @map("proposed_content")
+  rationale            String?
+  /// `supervisor_chat` | `simulation_feedback` | `conversation_review`
+  originType           String              @default("supervisor_chat") @map("origin_type")
+  originConversationId String?             @map("origin_conversation_id") @db.Uuid
+  originMessageId      String?             @map("origin_message_id") @db.Uuid
+  targetEntryId        String?             @map("target_entry_id") @db.Uuid
+  status               SalesLearningStatus @default(PENDING)
+  reviewedById         String?             @map("reviewed_by_id") @db.Uuid
+  reviewedAt           DateTime?           @map("reviewed_at")
+  createdAt            DateTime            @default(now()) @map("created_at")
+  updatedAt            DateTime            @updatedAt @map("updated_at")
+
+  @@index([workspaceId, status, createdAt(sort: Desc)])
+  @@map("sales_learning_proposals")
+}
+
+/// Real commercial & operational events for the Sales Agent console (no fabricated entries).
+model SalesEvent {
+  id             String    @id @default(uuid(7)) @db.Uuid
+  workspaceId    String    @map("workspace_id") @db.Uuid
+  workspace      Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  /// `message_received` | `product_identified` | `catalog_queried` | `reply_sent` | `handoff_triggered` | `communication_error` | `learning_proposed` | `knowledge_changed` | `config_changed`
+  type           String
+  channelType    String?   @map("channel_type")
+  conversationId String?   @map("conversation_id") @db.Uuid
+  summary        String
+  details        Json      @default("{}")
+  createdAt      DateTime  @default(now()) @map("created_at")
+
+  @@index([workspaceId, createdAt(sort: Desc)])
+  @@map("sales_events")
 }

@@ -8,6 +8,13 @@ const DEFAULT_SEARCH_LIMIT = 8;
 const MAX_SEARCH_LIMIT = 12;
 const MAX_DESCRIPTION_CHARS = 500;
 const MAX_IMAGES_PER_PRODUCT = 4;
+const MIN_TOKEN_LENGTH = 2;
+const MIN_ES_STEM_LENGTH = 5;
+const ES_SUFFIX_LENGTH = 2;
+const MIN_S_STEM_LENGTH = 4;
+const MAX_EXPANDED_TOKENS = 8;
+const SEARCH_CANDIDATE_MULTIPLIER = 3;
+const MIN_SEARCH_CANDIDATES = 24;
 
 export interface SafeBuyerVariantView {
   variantId: string;
@@ -25,6 +32,9 @@ export interface SafeBuyerProductView {
   description: string;
   vendor: string | null;
   tags: string[];
+  commercialStatus: 'active' | 'draft';
+  publishedExternally: boolean;
+  offerAuthorized: boolean;
   currencyCode: string;
   images: string[];
   buyUrls: Array<{ storeName: string; url: string }>;
@@ -34,6 +44,7 @@ export interface SafeBuyerProductView {
 export interface SalesToolExecutionResult {
   output: Record<string, unknown>;
   handoff?: { reason: string };
+  matchedProductIds?: string[];
 }
 
 function stripHtml(html: string): string {
@@ -44,10 +55,66 @@ function stripHtml(html: string): string {
     .slice(0, MAX_DESCRIPTION_CHARS);
 }
 
+function normalizeText(value: string): string {
+  return value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase();
+}
+
+/**
+ * Generates accent-insensitive search terms including singular stems (e.g. `tocadiscos` -> `tocadisco`)
+ * so natural Spanish/English buyer queries match real catalog titles reliably.
+ */
+export function expandSearchTokens(rawQuery: string): string[] {
+  const stopWords = new Set([
+    'de',
+    'del',
+    'la',
+    'el',
+    'los',
+    'las',
+    'un',
+    'una',
+    'unos',
+    'unas',
+    'en',
+    'con',
+    'para',
+    'por',
+    'the',
+    'for',
+    'and',
+  ]);
+  const tokens = rawQuery
+    .trim()
+    .split(/[\s,.;:!?/\\()]+/)
+    .map((part) => part.trim())
+    .filter((part) => part.length >= MIN_TOKEN_LENGTH && !stopWords.has(normalizeText(part)));
+
+  const expanded = new Set<string>();
+  for (const token of tokens) {
+    expanded.add(token);
+    const plain = normalizeText(token);
+    if (plain !== token.toLowerCase()) expanded.add(plain);
+    if (plain.length >= MIN_ES_STEM_LENGTH && plain.endsWith('es') && !plain.endsWith('tes')) {
+      expanded.add(plain.slice(0, -ES_SUFFIX_LENGTH));
+    }
+    if (plain.length >= MIN_S_STEM_LENGTH && plain.endsWith('s')) {
+      expanded.add(plain.slice(0, -1));
+    }
+  }
+  return [...expanded].slice(0, MAX_EXPANDED_TOKENS);
+}
+
 /**
  * Backend-enforced, strictly read-only commercial tools for the Sales Agent.
  * NEVER queries or returns `cost`, `unitCost`, internal margins, credentials, private ERP
  * metadata, or write/delete operations — enforced at the Prisma select & tool boundary.
+ *
+ * Includes both `ACTIVE` and `DRAFT` workspace products (excluding `ARCHIVED`), clearly
+ * differentiating commercial status, external publication status, stock availability, and
+ * offer authorization without equating draft products with out-of-stock products.
  */
 @Injectable()
 export class SalesAgentToolsService {
@@ -61,7 +128,7 @@ export class SalesAgentToolsService {
       {
         name: 'search_catalog_products',
         description:
-          'Search commercially available active products in the catalog by keywords, SKU, or brand. Returns titles, descriptions, current prices, real stock availability, variants, photos, and public purchase links.',
+          'Search authorized workspace products (including catalog drafts not yet published on external stores) by keywords, SKU, brand, or listing reference. Returns titles, real prices, real stock availability, commercial/publication status, variants, photos, and public purchase links.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -109,7 +176,10 @@ export class SalesAgentToolsService {
       const rawLimit = typeof input.limit === 'number' ? input.limit : DEFAULT_SEARCH_LIMIT;
       const limit = Math.min(Math.max(Math.floor(rawLimit), 1), MAX_SEARCH_LIMIT);
       const products = await this.searchProducts(workspaceId, query, limit, policy);
-      return { output: { count: products.length, products } };
+      return {
+        output: { count: products.length, products },
+        matchedProductIds: products.map((product) => product.productId),
+      };
     }
     if (toolName === 'get_product_commercial_details') {
       const productId = typeof input.productId === 'string' ? input.productId.trim() : '';
@@ -124,6 +194,7 @@ export class SalesAgentToolsService {
             warrantyNotes: policy.warrantyNotes ?? null,
           },
         },
+        matchedProductIds: product ? [product.productId] : [],
       };
     }
     if (toolName === 'handoff_to_human') {
@@ -139,6 +210,57 @@ export class SalesAgentToolsService {
     return { output: { error: `Tool '${toolName}' is not permitted for the Sales Agent.` } };
   }
 
+  /**
+   * Resolves a product directly from normalized channel context (listing ID, SKU, or product ref)
+   * so the agent knows which product a buyer is asking about without redundant questions.
+   */
+  async lookupProductByReference(
+    workspaceId: string,
+    ref: { listingId?: string | null; sku?: string | null; productRef?: string | null },
+    policy: SalesCommercialPolicy,
+  ): Promise<SafeBuyerProductView | null> {
+    const workspace = await this.prisma.workspace.findUnique({
+      where: { id: workspaceId },
+      select: { currency: true },
+    });
+    const currencyCode = workspace?.currency ?? 'USD';
+
+    const sku = ref.sku?.trim();
+    const listingId = ref.listingId?.trim();
+    const productRef = ref.productRef?.trim();
+
+    if (sku) {
+      const bySku = await this.prisma.product.findFirst({
+        where: {
+          workspaceId,
+          status: { in: [ProductStatus.ACTIVE, ProductStatus.DRAFT] },
+          variants: { some: { sku: { equals: sku, mode: 'insensitive' } } },
+        },
+        select: this.safeProductSelect(),
+      });
+      if (bySku) return this.toSafeBuyerView(bySku, currencyCode, policy);
+    }
+
+    if (listingId) {
+      const byListing = await this.prisma.product.findFirst({
+        where: {
+          workspaceId,
+          status: { in: [ProductStatus.ACTIVE, ProductStatus.DRAFT] },
+          listings: { some: { externalId: { equals: listingId, mode: 'insensitive' } } },
+        },
+        select: this.safeProductSelect(),
+      });
+      if (byListing) return this.toSafeBuyerView(byListing, currencyCode, policy);
+    }
+
+    if (productRef) {
+      const matches = await this.searchProducts(workspaceId, productRef, 1, policy);
+      if (matches[0]) return matches[0];
+    }
+
+    return null;
+  }
+
   async searchProducts(
     workspaceId: string,
     query: string,
@@ -150,28 +272,45 @@ export class SalesAgentToolsService {
       select: { currency: true },
     });
     const currencyCode = workspace?.currency ?? 'USD';
+    const tokens = query ? expandSearchTokens(query) : [];
+
+    const orClauses = tokens.flatMap((token) => [
+      { title: { contains: token, mode: 'insensitive' as const } },
+      { vendor: { contains: token, mode: 'insensitive' as const } },
+      { descriptionHtml: { contains: token, mode: 'insensitive' as const } },
+      { variants: { some: { sku: { contains: token, mode: 'insensitive' as const } } } },
+      { listings: { some: { externalId: { equals: token, mode: 'insensitive' as const } } } },
+    ]);
 
     const products = await this.prisma.product.findMany({
       where: {
         workspaceId,
-        status: ProductStatus.ACTIVE,
-        ...(query
-          ? {
-              OR: [
-                { title: { contains: query, mode: 'insensitive' } },
-                { vendor: { contains: query, mode: 'insensitive' } },
-                { descriptionHtml: { contains: query, mode: 'insensitive' } },
-                { variants: { some: { sku: { contains: query, mode: 'insensitive' } } } },
-              ],
-            }
-          : {}),
+        status: { in: [ProductStatus.ACTIVE, ProductStatus.DRAFT] },
+        ...(orClauses.length > 0 ? { OR: orClauses } : {}),
       },
       orderBy: { updatedAt: 'desc' },
-      take: limit,
+      take: Math.max(limit * SEARCH_CANDIDATE_MULTIPLIER, MIN_SEARCH_CANDIDATES),
       select: this.safeProductSelect(),
     });
 
-    return products.map((product) => this.toSafeBuyerView(product, currencyCode, policy));
+    const mapped = products.map((product) => this.toSafeBuyerView(product, currencyCode, policy));
+    const normTokens = tokens.map((token) => normalizeText(token));
+
+    // Rank: in-stock products with most token matches in title/SKU first.
+    mapped.sort((left, right) => {
+      const leftStock = left.variants.some((variant) => variant.inStock) ? 1 : 0;
+      const rightStock = right.variants.some((variant) => variant.inStock) ? 1 : 0;
+      if (leftStock !== rightStock) return rightStock - leftStock;
+      const scoreOf = (item: SafeBuyerProductView): number => {
+        const hay = normalizeText(
+          `${item.title} ${item.vendor ?? ''} ${item.variants.map((variant) => variant.sku ?? '').join(' ')}`,
+        );
+        return normTokens.reduce((acc, tok) => acc + (hay.includes(tok) ? 1 : 0), 0);
+      };
+      return scoreOf(right) - scoreOf(left);
+    });
+
+    return mapped.slice(0, limit);
   }
 
   async getProduct(
@@ -185,7 +324,11 @@ export class SalesAgentToolsService {
     });
     const currencyCode = workspace?.currency ?? 'USD';
     const product = await this.prisma.product.findFirst({
-      where: { id: productId, workspaceId, status: ProductStatus.ACTIVE },
+      where: {
+        id: productId,
+        workspaceId,
+        status: { in: [ProductStatus.ACTIVE, ProductStatus.DRAFT] },
+      },
       select: this.safeProductSelect(),
     });
     return product ? this.toSafeBuyerView(product, currencyCode, policy) : null;
@@ -199,6 +342,7 @@ export class SalesAgentToolsService {
       descriptionHtml: true,
       vendor: true,
       tags: true,
+      status: true,
       media: {
         orderBy: { position: 'asc' as const },
         take: MAX_IMAGES_PER_PRODUCT,
@@ -233,6 +377,7 @@ export class SalesAgentToolsService {
       descriptionHtml: string;
       vendor: string | null;
       tags: string[];
+      status: ProductStatus;
       media: Array<{ url: string }>;
       listings: Array<{
         externalUrl: string | null;
@@ -295,6 +440,9 @@ export class SalesAgentToolsService {
       description: stripHtml(product.descriptionHtml),
       vendor: product.vendor,
       tags: product.tags,
+      commercialStatus: product.status === ProductStatus.ACTIVE ? 'active' : 'draft',
+      publishedExternally: buyUrls.length > 0,
+      offerAuthorized: product.status !== ProductStatus.ARCHIVED,
       currencyCode,
       images: product.media.map((item) => item.url),
       buyUrls,

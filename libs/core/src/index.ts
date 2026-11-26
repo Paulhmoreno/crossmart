@@ -425,5 +425,6 @@ export * from './chatwoot/chatwoot.client.js';
 export * from './chatwoot/chatwoot-connections.service.js';
 export * from './sales-agent/sales-agent.module.js';
 export * from './sales-agent/agent-configs.service.js';
+export * from './sales-agent/sales-knowledge.service.js';
 export * from './sales-agent/sales-agent-tools.service.js';
 export * from './sales-agent/sales-agent.service.js';
