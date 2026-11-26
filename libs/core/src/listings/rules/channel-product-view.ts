@@ -1,4 +1,4 @@
-import type { Prisma } from '@crossmart/database';
+import { ListingStatus, type Prisma } from '@crossmart/database';
 import { ChannelProductState } from '../enums/channel-product-state.enum.js';
 import { ChannelProductView } from '../enums/channel-product-view.enum.js';
 import { ListingDisplayState } from '../enums/listing-display-state.enum.js';
@@ -36,6 +36,14 @@ export function channelProductViewWhere(
   scope: ChannelProductScope,
   view: ChannelProductView,
 ): Prisma.ProductWhereInput {
+  if (view === ChannelProductView.Live) {
+    return {
+      AND: [
+        channelProductStateWhere(scope, ChannelProductState.Listed),
+        { listings: { some: { connectionId: scope.connectionId, status: ListingStatus.ACTIVE } } },
+      ],
+    };
+  }
   const states = VIEW_STATES[view];
   if (!states) return inStoreWhere(scope);
   return { OR: states.map((state) => channelProductStateWhere(scope, state)) };

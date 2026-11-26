@@ -20,6 +20,7 @@ function setup() {
     count: vi.fn<ChannelProductsRepository['count']>(),
   };
   for (const state of STATES) products.count.mockResolvedValueOnce(STATE_COUNTS[state]);
+  products.count.mockResolvedValueOnce(2); // active (live) count excluding INACTIVE drafts
   const listingStates = {
     countNeedsDetails: vi
       .fn<StoreListingStates['countNeedsDetails']>()
@@ -42,7 +43,7 @@ describe('ChannelProductCounter', () => {
 
     const counts = await counter.count(target, SEARCH);
 
-    expect(counts).toEqual({ ...STATE_COUNTS, needsDetails: 3, needsAttention: 4 });
+    expect(counts).toEqual({ ...STATE_COUNTS, live: 2, needsDetails: 3, needsAttention: 4 });
   });
 
   it('counts within the search, in the workspace', async () => {
@@ -50,8 +51,8 @@ describe('ChannelProductCounter', () => {
 
     await counter.count(target, SEARCH);
 
-    expect(products.count).toHaveBeenCalledTimes(STATES.length);
-    for (const [where] of products.count.mock.calls) {
+    expect(products.count).toHaveBeenCalledTimes(STATES.length + 1);
+    for (const [where] of products.count.mock.calls.slice(0, STATES.length)) {
       expect(where).toEqual({
         AND: [expect.objectContaining({ workspaceId: WORKSPACE_ID }), SEARCH],
       });

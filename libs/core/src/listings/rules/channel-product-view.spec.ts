@@ -1,3 +1,4 @@
+import { ListingStatus } from '@crossmart/database';
 import { ChannelProductState } from '../enums/channel-product-state.enum.js';
 import { ChannelProductView } from '../enums/channel-product-view.enum.js';
 import { ListingDisplayState } from '../enums/listing-display-state.enum.js';
@@ -26,9 +27,12 @@ describe('channelProductViewWhere', () => {
   });
 
   it('narrows each other view to the product states it is made of', () => {
-    expect(channelProductViewWhere(SCOPE, ChannelProductView.Live)).toEqual(
-      statesWhere(ChannelProductState.Listed),
-    );
+    expect(channelProductViewWhere(SCOPE, ChannelProductView.Live)).toEqual({
+      AND: [
+        channelProductStateWhere(SCOPE, ChannelProductState.Listed),
+        { listings: { some: { connectionId: CONNECTION_ID, status: ListingStatus.ACTIVE } } },
+      ],
+    });
     expect(channelProductViewWhere(SCOPE, ChannelProductView.NeedsAttention)).toEqual(
       statesWhere(ChannelProductState.Failed, ChannelProductState.Pending),
     );

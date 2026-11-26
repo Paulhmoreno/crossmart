@@ -16,8 +16,10 @@ export interface ChannelProductRow extends ListingDisplayFields {
   listing: ListingSummary | null;
 }
 
-/** Products in each state, and in the two groups a merchant acts on. */
+/** Products in each state, and in the groups a merchant acts on. */
 export interface ChannelProductCounts extends Record<ChannelProductState, number> {
+  /** Products with an ACTIVE (live) listing on the store (excludes INACTIVE drafts). */
+  live: number;
   /** Products whose display state is `needs_details` (pending or failed ones). */
   needsDetails: number;
   /** Products failed or needing details, each once: the needs attention view. */

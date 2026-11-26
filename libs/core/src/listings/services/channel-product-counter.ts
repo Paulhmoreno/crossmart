@@ -2,11 +2,13 @@ import { Injectable } from '@nestjs/common';
 import type { Prisma } from '@crossmart/database';
 import type { ChannelProductCounts } from '../entities/channel-product.js';
 import { ChannelProductState } from '../enums/channel-product-state.enum.js';
+import { ChannelProductView } from '../enums/channel-product-view.enum.js';
 import { ChannelProductsRepository } from '../repositories/channel-products.repository.js';
 import {
   type ChannelProductScope,
   channelProductStateWhere,
 } from '../rules/channel-product-state-where.js';
+import { channelProductViewWhere } from '../rules/channel-product-view.js';
 import type { DisplayFilterTarget } from './channel-product-displays.js';
 import { StoreListingStates } from './store-listing-states.js';
 
@@ -33,12 +35,16 @@ export class ChannelProductCounter {
     { scope, connection }: DisplayFilterTarget,
     search: Prisma.ProductWhereInput,
   ): Promise<ChannelProductCounts> {
-    const [states, needsDetails] = await Promise.all([
+    const [states, live, needsDetails] = await Promise.all([
       this.countStates(scope, search),
+      this.products.count({
+        AND: [channelProductViewWhere(scope, ChannelProductView.Live), search],
+      }),
       this.listingStates.countNeedsDetails(scope.workspaceId, connection, search),
     ]);
     return {
       ...states,
+      live,
       needsDetails: needsDetails.total,
       needsAttention: states[ChannelProductState.Failed] + needsDetails.unsent,
     };

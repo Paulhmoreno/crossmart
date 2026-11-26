@@ -52,6 +52,11 @@ export class ChannelProductCountsDto implements ChannelProductCounts {
   [ChannelProductState.Excluded]: number;
 
   @ApiProperty({
+    description: 'Products with an ACTIVE (live) listing on the store (excludes INACTIVE drafts)',
+  })
+  live: number;
+
+  @ApiProperty({
     description:
       'Products whose display state is `needs_details`: selected, and the store setup or the ' +
       'product lacks something publishing needs. Some may also be counted as `failed`',
