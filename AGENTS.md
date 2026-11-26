@@ -21,5 +21,6 @@ Read [CLAUDE.md](CLAUDE.md), [CONTRIBUTING.md](CONTRIBUTING.md) and [IMPLEMENTAT
 - Keep machine-readable identifiers, API contracts and technical diagnostics stable and in English. Localize operator-visible messages through the shared UI translation mechanism, using stable error codes or narrowly scoped mappings as needed. Do not hard-code a second language in backend responses or change existing API semantics just to translate a label.
 - Keep commercial product content and agent output language separate from the interface locale. Do not regenerate or translate saved product content on a UI language change.
 - Never remove validation, authorization, meaningful errors or ERP source ownership protections during visual cleanup. Do not build extra UI explanations for backend safeguards.
+- Settings screens must be limited to configuring services and integrations, without duplicating operational modules, product listings, or dashboards.
 
 Code, commits and repository documentation are in English, as required upstream.
