@@ -58,7 +58,7 @@ function splitValidationCauses(causes: readonly MercadoLibreValidateCause[]): {
   const warnings: string[] = [];
   const errors: string[] = [];
   for (const cause of causes) {
-    const text = cause.message?.trim();
+    const text = cause.message?.trim() || cause.code?.trim();
     if (!text) continue;
     if (cause.type === WARNING_CAUSE_TYPE) warnings.push(text);
     else errors.push(text);
@@ -89,7 +89,7 @@ export class MercadoLibreItemClient {
       const parsed = validateBodySchema.safeParse(parseJsonBody(response.body));
       if (parsed.success) {
         const { warnings, errors } = splitValidationCauses(parsed.data.cause);
-        if (errors.length === 0 && parsed.data.message?.trim()) {
+        if (errors.length === 0 && warnings.length === 0 && parsed.data.message?.trim()) {
           errors.push(parsed.data.message.trim());
         }
         return { valid: errors.length === 0, warnings, errors };
