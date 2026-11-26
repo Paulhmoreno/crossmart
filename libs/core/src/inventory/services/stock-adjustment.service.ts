@@ -1,5 +1,11 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { CatalogSourceKind } from '@crossmart/database';
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+  Optional,
+} from '@nestjs/common';
+import { CatalogSourceKind, PrismaService } from '@crossmart/database';
 import { ActivityAction } from '../../activity/enums/activity-action.enum.js';
 import { ActivitySubjectType } from '../../activity/enums/activity-subject-type.enum.js';
 import { ActivityRecorder } from '../../activity/services/activity-recorder.js';
@@ -33,6 +39,7 @@ export class StockAdjustmentService {
     private readonly writer: StockAdjustmentWriter,
     private readonly activity: ActivityRecorder,
     private readonly events: CatalogEventBus,
+    @Optional() private readonly prisma?: PrismaService,
   ) {}
 
   /** Applies the adjustment and returns the item's new stock. Setting the same stock is a no-op. */
@@ -43,6 +50,15 @@ export class StockAdjustmentService {
   ): Promise<InventoryRow> {
     if (!MANUAL_MOVEMENT_REASONS.includes(adjustment.reason)) {
       throw new BadRequestException(SYSTEM_REASON);
+    }
+    if (this.prisma) {
+      const exclusiveOdoo = await this.prisma.odooConnection.findUnique({
+        where: { workspaceId },
+        select: { id: true },
+      });
+      if (exclusiveOdoo) {
+        throw new ForbiddenException(ODOO_MANAGED_STOCK_MESSAGE);
+      }
     }
     const existing = await this.items.findRow(workspaceId, inventoryItemId);
     if (!existing) {

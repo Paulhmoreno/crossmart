@@ -11,6 +11,10 @@ export const ORDER_DETAIL_INCLUDE = {
     include: { variant: { select: { productId: true } } },
     orderBy: { id: 'asc' },
   },
+  events: {
+    orderBy: { createdAt: 'desc' },
+    take: 50,
+  },
 } satisfies Prisma.OrderInclude;
 
 export type OrderSummaryRecord = Prisma.OrderGetPayload<{ include: typeof ORDER_SUMMARY_INCLUDE }>;

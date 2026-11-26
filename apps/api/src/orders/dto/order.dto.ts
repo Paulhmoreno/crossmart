@@ -1,5 +1,11 @@
 import { ApiProperty } from '@nestjs/swagger';
-import type { OrderDetail, OrderLineView, OrderPage, OrderSummary } from '@crossmart/core';
+import type {
+  OrderDetail,
+  OrderEventView,
+  OrderLineView,
+  OrderPage,
+  OrderSummary,
+} from '@crossmart/core';
 import { OrderStatus } from '@crossmart/database';
 import { ORDER_STATUS_SCHEMA_NAME } from '../orders.constants.js';
 
@@ -12,6 +18,45 @@ export class OrderSummaryDto implements OrderSummary {
 
   @ApiProperty({ enum: OrderStatus, enumName: ORDER_STATUS_SCHEMA_NAME })
   status: OrderStatus;
+
+  @ApiProperty({ example: 'CONFIRMED' })
+  commercialStatus: string;
+
+  @ApiProperty({ example: 'PAID' })
+  paymentStatus: string;
+
+  @ApiProperty({ example: 'RESERVED' })
+  reservationStatus: string;
+
+  @ApiProperty({ example: 'PENDING' })
+  logisticsStatus: string;
+
+  @ApiProperty({ example: 'NOT_INVOICED' })
+  invoicingStatus: string;
+
+  @ApiProperty({ example: 'ESTIMATED' })
+  financialStatus: string;
+
+  @ApiProperty()
+  manualInterventionRequired: boolean;
+
+  @ApiProperty()
+  manualReleaseLock: boolean;
+
+  @ApiProperty({ type: String, nullable: true })
+  erpOrderId: string | null;
+
+  @ApiProperty({ type: String, nullable: true })
+  erpOrderName: string | null;
+
+  @ApiProperty({ type: String, nullable: true })
+  erpInvoiceId: string | null;
+
+  @ApiProperty({ type: String, nullable: true })
+  erpInvoiceName: string | null;
+
+  @ApiProperty()
+  incidentCount: number;
 
   @ApiProperty({ example: 'USD' })
   currencyCode: string;
@@ -42,6 +87,26 @@ export class OrderSummaryDto implements OrderSummary {
   static from(order: OrderSummary): OrderSummaryDto {
     return Object.assign(new OrderSummaryDto(), order);
   }
+}
+
+export class OrderEventDto implements OrderEventView {
+  @ApiProperty({ format: 'uuid' })
+  id: string;
+
+  @ApiProperty()
+  eventType: string;
+
+  @ApiProperty()
+  summary: string;
+
+  @ApiProperty({ type: String, nullable: true })
+  actorLabel: string | null;
+
+  @ApiProperty({ type: Object })
+  metadata: Record<string, unknown>;
+
+  @ApiProperty()
+  createdAt: Date;
 }
 
 export class OrderLineDto implements OrderLineView {
@@ -76,6 +141,36 @@ export class OrderLineDto implements OrderLineView {
 export class OrderDetailDto extends OrderSummaryDto implements OrderDetail {
   @ApiProperty({ description: 'The order’s id on its channel' })
   externalId: string;
+
+  @ApiProperty({ type: String, nullable: true })
+  externalPackId: string | null;
+
+  @ApiProperty({ type: String, nullable: true })
+  manualReleaseReason: string | null;
+
+  @ApiProperty({ type: Date, nullable: true })
+  manualReleasedAt: Date | null;
+
+  @ApiProperty({ type: Object, nullable: true })
+  buyerInfo: Record<string, unknown> | null;
+
+  @ApiProperty({ type: Object, nullable: true })
+  fiscalInfo: Record<string, unknown> | null;
+
+  @ApiProperty({ type: Object, nullable: true })
+  shippingInfo: Record<string, unknown> | null;
+
+  @ApiProperty({ type: Object, nullable: true })
+  financialBreakdown: Record<string, unknown> | null;
+
+  @ApiProperty({ type: Object, nullable: true })
+  logisticsInfo: Record<string, unknown> | null;
+
+  @ApiProperty({ type: [Object] })
+  incidents: Array<Record<string, unknown>>;
+
+  @ApiProperty({ type: [OrderEventDto] })
+  events: OrderEventDto[];
 
   @ApiProperty({ type: [OrderLineDto] })
   lines: OrderLineDto[];

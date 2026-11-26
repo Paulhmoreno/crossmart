@@ -1,4 +1,5 @@
-import { BadRequestException, Inject, Injectable } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Inject, Injectable, Optional } from '@nestjs/common';
+import { PrismaService } from '@crossmart/database';
 import { ActivityRecorder } from '../../activity/services/activity-recorder.js';
 import { CatalogChangeKind } from '../../events/enums/catalog-change-kind.enum.js';
 import { CatalogEventBus } from '../../events/services/catalog-event-bus.js';
@@ -11,6 +12,7 @@ import type {
   ImportOutcome,
 } from '../entities/catalog-import.js';
 import { toImportActivityEntry, toImportEntry } from '../rules/import-activity.js';
+import { ODOO_EXCLUSIVE_CATALOG_IMPORT_MESSAGE } from '../rules/source-ownership.rules.js';
 import { ImportJobsService } from './import-jobs.service.js';
 
 /**
@@ -24,12 +26,25 @@ export class CatalogImportService {
     private readonly jobs: ImportJobsService,
     private readonly activity: ActivityRecorder,
     private readonly events: CatalogEventBus,
+    @Optional() private readonly prisma?: PrismaService,
   ) {}
 
   async importFile(
     workspaceId: string,
     request: CatalogImportRequest,
   ): Promise<CatalogImportResult> {
+    if (
+      this.prisma &&
+      (request.mode === CatalogImportMode.Create || request.mode === CatalogImportMode.Inventory)
+    ) {
+      const exclusiveOdoo = await this.prisma.odooConnection.findUnique({
+        where: { workspaceId },
+        select: { id: true },
+      });
+      if (exclusiveOdoo) {
+        throw new ForbiddenException(ODOO_EXCLUSIVE_CATALOG_IMPORT_MESSAGE);
+      }
+    }
     const strategy = this.strategyFor(request);
     const { mode, format, fileName, actor } = request;
     const jobId = await this.jobs.start(workspaceId, { mode, format, fileName, actor });

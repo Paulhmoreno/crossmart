@@ -3,6 +3,7 @@ import { ActivityModule } from '../activity/activity.module.js';
 import { ChannelsModule } from '../channels/channels.module.js';
 import { EventsModule } from '../events/events.module.js';
 import { InventoryModule } from '../inventory/inventory.module.js';
+import { OdooModule } from '../odoo/odoo.module.js';
 import { WebhookOutboxModule } from '../webhooks/webhook-outbox.module.js';
 import { BullOrderJobQueue } from './queue/bull-order-job.queue.js';
 import { OrderJobQueue } from './queue/order-job.queue.js';
@@ -10,6 +11,7 @@ import { OrderRepository } from './repositories/order.repository.js';
 import { OrderVariantMatcher } from './repositories/order-variant.matcher.js';
 import { OrderWriter } from './repositories/order.writer.js';
 import { OrderIngestionService } from './services/order-ingestion.service.js';
+import { OrderOrchestrationService } from './services/order-orchestration.service.js';
 import { OrderRetentionService } from './services/order-retention.service.js';
 import { OrderSyncService } from './services/order-sync.service.js';
 import { OrderWebhookListener } from './services/order-webhook.listener.js';
@@ -20,12 +22,20 @@ import { OrdersService } from './services/orders.service.js';
  * ingestion stores them and reserves their stock. Needs the global `QueuesModule`.
  */
 @Module({
-  imports: [ActivityModule, ChannelsModule, EventsModule, InventoryModule, WebhookOutboxModule],
+  imports: [
+    ActivityModule,
+    ChannelsModule,
+    EventsModule,
+    InventoryModule,
+    OdooModule,
+    WebhookOutboxModule,
+  ],
   providers: [
     OrderRepository,
     OrderVariantMatcher,
     OrderWriter,
     OrderIngestionService,
+    OrderOrchestrationService,
     OrderRetentionService,
     OrderSyncService,
     OrderWebhookListener,
@@ -34,6 +44,7 @@ import { OrdersService } from './services/orders.service.js';
   ],
   exports: [
     OrdersService,
+    OrderOrchestrationService,
     OrderSyncService,
     OrderIngestionService,
     OrderRetentionService,

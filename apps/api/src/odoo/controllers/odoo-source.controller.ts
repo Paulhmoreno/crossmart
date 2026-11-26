@@ -15,6 +15,7 @@ import { ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
 import {
   type Actor,
   OdooConnectionService,
+  OdooEventIngestionService,
   OdooSyncService,
   WorkspacePermission,
 } from '@crossmart/core';
@@ -39,7 +40,17 @@ export class OdooSourceController {
   constructor(
     private readonly connections: OdooConnectionService,
     private readonly sync: OdooSyncService,
+    private readonly eventIngestion: OdooEventIngestionService,
   ) {}
+
+  @Get('capabilities')
+  @RequirePermission(WorkspacePermission.ViewChannels)
+  @ApiOperation({
+    summary: 'Get Odoo crossmart_connector module version, granted capabilities, and event metrics',
+  })
+  async getCapabilities(@Param(WORKSPACE_ID_PARAM, ParseUUIDPipe) workspaceId: string) {
+    return this.eventIngestion.getOperationalCapabilities(workspaceId);
+  }
 
   @Get()
   @RequirePermission(WorkspacePermission.ViewChannels)

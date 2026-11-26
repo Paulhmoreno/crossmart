@@ -82,8 +82,18 @@ export class OrderWriter {
           },
         ]),
       );
-      const { plans, result } = await this.moveStock(tx, input, held);
-      const orderId = await this.saveOrder(tx, input);
+      const { plans, result } = existing?.manualReleaseLock
+        ? {
+            plans: linesOf(input.order, held).map(({ externalId, line }) => ({
+              externalId,
+              line,
+              variantId: held.get(externalId)?.variantId ?? input.variantIds.get(externalId) ?? null,
+              stock: held.get(externalId) ?? NOTHING_HELD,
+            })),
+            result: { applied: true, changedInventoryItemIds: [], oversold: [] },
+          }
+        : await this.moveStock(tx, input, held);
+      const orderId = await this.saveOrder(tx, input, plans, existing?.manualReleaseLock ?? false);
       for (const plan of plans)
         await this.saveLine(tx, { workspaceId: input.workspaceId, orderId }, plan);
       await this.publish(tx, input, orderId, existing?.externalUpdatedAt ?? null);
@@ -188,11 +198,37 @@ export class OrderWriter {
     });
   }
 
-  private async saveOrder(tx: Transaction, input: OrderToStore): Promise<string> {
+  private async saveOrder(
+    tx: Transaction,
+    input: OrderToStore,
+    plans: LinePlan[],
+    manualReleaseLock: boolean,
+  ): Promise<string> {
     const { workspaceId, connectionId, order } = input;
+    const status = orderStatusOf(order.cancelled, order.lines);
+    const totalOrdered = plans.reduce((acc, p) => acc + (p.line?.quantity ?? 0), 0);
+    const totalReserved = plans.reduce((acc, p) => acc + p.stock.reserved, 0);
+    const totalFulfilled = plans.reduce((acc, p) => acc + p.stock.fulfilled, 0);
+    const reservationStatus = manualReleaseLock
+      ? 'MANUALLY_RELEASED'
+      : order.cancelled
+        ? 'RELEASED'
+        : totalOrdered > 0 && totalFulfilled >= totalOrdered
+          ? 'FULFILLED'
+          : totalOrdered > 0 && totalReserved >= totalOrdered
+            ? 'RESERVED'
+            : totalReserved > 0
+              ? 'PARTIALLY_RESERVED'
+              : 'UNRESERVED';
     const fields = {
       name: order.name,
-      status: orderStatusOf(order.cancelled, order.lines),
+      status,
+      commercialStatus: order.cancelled
+        ? 'CANCELLED'
+        : status === 'FULFILLED'
+          ? 'FULFILLED'
+          : 'CONFIRMED',
+      reservationStatus,
       currencyCode: order.currencyCode,
       total: order.total,
       placedAt: order.placedAt,

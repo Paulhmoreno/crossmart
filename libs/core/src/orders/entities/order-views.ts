@@ -14,10 +14,32 @@ export interface OrderLineView {
   productId: string | null;
 }
 
+export interface OrderEventView {
+  id: string;
+  eventType: string;
+  summary: string;
+  actorLabel: string | null;
+  metadata: Record<string, unknown>;
+  createdAt: Date;
+}
+
 export interface OrderSummary {
   id: string;
   name: string;
   status: OrderStatus;
+  commercialStatus: string;
+  paymentStatus: string;
+  reservationStatus: string;
+  logisticsStatus: string;
+  invoicingStatus: string;
+  financialStatus: string;
+  manualInterventionRequired: boolean;
+  manualReleaseLock: boolean;
+  erpOrderId: string | null;
+  erpOrderName: string | null;
+  erpInvoiceId: string | null;
+  erpInvoiceName: string | null;
+  incidentCount: number;
   currencyCode: string;
   total: string;
   placedAt: Date;
@@ -31,11 +53,25 @@ export interface OrderSummary {
 
 export interface OrderDetail extends OrderSummary {
   externalId: string;
+  externalPackId: string | null;
+  manualReleaseReason: string | null;
+  manualReleasedAt: Date | null;
+  buyerInfo: Record<string, unknown> | null;
+  fiscalInfo: Record<string, unknown> | null;
+  shippingInfo: Record<string, unknown> | null;
+  financialBreakdown: Record<string, unknown> | null;
+  logisticsInfo: Record<string, unknown> | null;
+  incidents: Array<Record<string, unknown>>;
+  events: OrderEventView[];
   lines: OrderLineView[];
 }
 
 export interface OrderListQuery {
   status?: OrderStatus;
+  reservationStatus?: string;
+  invoicingStatus?: string;
+  logisticsStatus?: string;
+  hasIncidents?: boolean;
   connectionId?: string;
   /** Matches the order number. */
   search?: string;

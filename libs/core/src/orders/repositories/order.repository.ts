@@ -28,6 +28,10 @@ export class OrderRepository {
     const where: Prisma.OrderWhereInput = {
       workspaceId,
       status: query.status,
+      ...(query.reservationStatus ? { reservationStatus: query.reservationStatus } : {}),
+      ...(query.invoicingStatus ? { invoicingStatus: query.invoicingStatus } : {}),
+      ...(query.logisticsStatus ? { logisticsStatus: query.logisticsStatus } : {}),
+      ...(query.hasIncidents ? { manualInterventionRequired: true } : {}),
       connectionId: query.connectionId,
       ...(query.search ? { name: { contains: query.search, mode: INSENSITIVE } } : {}),
     };

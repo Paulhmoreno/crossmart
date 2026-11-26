@@ -1,7 +1,15 @@
-import { BadRequestException, ConflictException, Injectable } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+  Injectable,
+  Optional,
+} from '@nestjs/common';
+import { PrismaService } from '@crossmart/database';
 import { EntitlementService } from '../../entitlements/services/entitlement.service.js';
 import type { ProductDraft } from '../entities/product-draft.js';
 import { findDraftProblems } from '../rules/product-draft.rules.js';
+import { ODOO_EXCLUSIVE_CATALOG_CREATE_MESSAGE } from '../rules/source-ownership.rules.js';
 import { CatalogConflictsService } from './catalog-conflicts.service.js';
 
 /**
@@ -13,10 +21,20 @@ export class ProductAdmission {
   constructor(
     private readonly conflicts: CatalogConflictsService,
     private readonly entitlements: EntitlementService,
+    @Optional() private readonly prisma?: PrismaService,
   ) {}
 
   /** `draft` must be normalized. */
   async assertCreatable(workspaceId: string, draft: ProductDraft): Promise<void> {
+    if (this.prisma) {
+      const exclusiveOdoo = await this.prisma.odooConnection.findUnique({
+        where: { workspaceId },
+        select: { id: true },
+      });
+      if (exclusiveOdoo) {
+        throw new ForbiddenException(ODOO_EXCLUSIVE_CATALOG_CREATE_MESSAGE);
+      }
+    }
     this.assertValid(draft);
     await this.assertNoConflicts(workspaceId, draft);
     await this.entitlements.assertProductRoom(workspaceId);

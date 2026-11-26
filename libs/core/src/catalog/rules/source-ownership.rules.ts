@@ -11,6 +11,10 @@ export const ODOO_MANAGED_STOCK_MESSAGE =
 export const ODOO_MANAGED_DELETE_MESSAGE = 'Products synced from Odoo cannot be deleted manually.';
 export const ODOO_MANAGED_BULK_PRICE_MESSAGE =
   'Base prices of products synced from Odoo cannot be bulk-adjusted.';
+export const ODOO_EXCLUSIVE_CATALOG_CREATE_MESSAGE =
+  'Products and stock are managed exclusively from Odoo. Create or import products in Odoo instead.';
+export const ODOO_EXCLUSIVE_CATALOG_IMPORT_MESSAGE =
+  'External catalog and inventory imports are disabled while Odoo is configured as the exclusive catalog source.';
 
 function arraysEqual(left: readonly string[], right: readonly string[]): boolean {
   return left.length === right.length && left.every((value, index) => value === right[index]);
