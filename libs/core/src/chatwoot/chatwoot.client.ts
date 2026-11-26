@@ -1,7 +1,25 @@
 import { Injectable, Logger } from '@nestjs/common';
 
 const REQUEST_TIMEOUT_MS = 20_000;
-const MAX_ERROR_CHARS = 300;
+const HTTP_UNAUTHORIZED = 401;
+const HTTP_FORBIDDEN = 403;
+const HTTP_NOT_FOUND = 404;
+
+/**
+ * Coded Chatwoot API error whose message is safe for logs and UI feedback (never embeds tokens
+ * or raw response bodies). Implements the `code` contract recognized by `describeError()`.
+ */
+export class ChatwootApiError extends Error {
+  readonly code: string;
+  readonly status?: number;
+
+  constructor(code: string, message: string, status?: number) {
+    super(message);
+    this.name = 'ChatwootApiError';
+    this.code = code;
+    this.status = status;
+  }
+}
 
 export interface ChatwootAccountSummary {
   id: number;
@@ -12,6 +30,12 @@ export interface ChatwootInboxSummary {
   id: number;
   name: string;
   channelType: string;
+}
+
+export interface ChatwootAgentBotSummary {
+  id: number;
+  name: string;
+  outgoingUrl: string | null;
 }
 
 export interface ChatwootConversationState {
@@ -27,9 +51,14 @@ export interface ChatwootProfileResult {
 
 export function normalizeChatwootBaseUrl(rawUrl: string): string {
   const trimmed = rawUrl.trim().replace(/\/+$/, '');
-  const parsed = new URL(trimmed);
+  let parsed: URL;
+  try {
+    parsed = new URL(trimmed);
+  } catch {
+    throw new ChatwootApiError('CHATWOOT_INVALID_URL', 'Enter a valid Chatwoot instance URL.');
+  }
   if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-    throw new Error('Chatwoot URL must use http or https.');
+    throw new ChatwootApiError('CHATWOOT_INVALID_URL', 'Chatwoot URL must use http or https.');
   }
   return parsed.origin + parsed.pathname.replace(/\/+$/, '');
 }
@@ -161,6 +190,33 @@ export class ChatwootClient {
     );
   }
 
+  async listAgentBots(
+    baseUrl: string,
+    accountId: number,
+    apiAccessToken: string,
+    fetchImpl: typeof fetch = fetch,
+  ): Promise<ChatwootAgentBotSummary[]> {
+    const cleanBase = normalizeChatwootBaseUrl(baseUrl);
+    const data = await this.request<
+      | Array<{ id?: number; name?: string; outgoing_url?: string | null }>
+      | { payload?: Array<{ id?: number; name?: string; outgoing_url?: string | null }> }
+    >(`${cleanBase}/api/v1/accounts/${accountId}/agent_bots`, {
+      method: 'GET',
+      token: apiAccessToken,
+      fetchImpl,
+    });
+    const list = Array.isArray(data) ? data : (data.payload ?? []);
+    return list
+      .filter((item): item is { id: number; name?: string; outgoing_url?: string | null } => {
+        return typeof item.id === 'number';
+      })
+      .map((item) => ({
+        id: item.id,
+        name: item.name?.trim() || `AgentBot ${item.id}`,
+        outgoingUrl: item.outgoing_url?.trim() || null,
+      }));
+  }
+
   private async request<Result>(
     url: string,
     options: {
@@ -170,26 +226,92 @@ export class ChatwootClient {
       fetchImpl: typeof fetch;
     },
   ): Promise<Result> {
+    // Send RFC-compliant hyphenated header first so reverse proxies (Cloudflare, Nginx default)
+    // do not drop underscore headers; Rails/Rack maps `api-access-token` to `HTTP_API_ACCESS_TOKEN`.
+    // Fall back once to `api_access_token` on 401 for direct/custom servers expecting underscores.
+    let response = await this.sendOnce(url, 'api-access-token', options);
+    if (response.status === HTTP_UNAUTHORIZED) {
+      response = await this.sendOnce(url, 'api_access_token', options);
+    }
+    if (!response.ok) {
+      this.logger.warn(`Chatwoot API ${options.method} failed with HTTP ${response.status}`);
+      throw this.toHttpError(response.status);
+    }
+    try {
+      return (await response.json()) as Result;
+    } catch {
+      throw new ChatwootApiError(
+        'CHATWOOT_INVALID_RESPONSE',
+        'Chatwoot returned a non-JSON response. Verify the instance URL.',
+        response.status,
+      );
+    }
+  }
+
+  private async sendOnce(
+    url: string,
+    tokenHeader: 'api-access-token' | 'api_access_token',
+    options: {
+      method: 'GET' | 'POST';
+      token: string;
+      body?: Record<string, unknown>;
+      fetchImpl: typeof fetch;
+    },
+  ): Promise<Response> {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
     try {
-      const response = await options.fetchImpl(url, {
+      return await options.fetchImpl(url, {
         method: options.method,
         headers: {
-          api_access_token: options.token,
+          [tokenHeader]: options.token,
           ...(options.body ? { 'content-type': 'application/json' } : {}),
         },
         ...(options.body ? { body: JSON.stringify(options.body) } : {}),
         signal: controller.signal,
       });
-      if (!response.ok) {
-        const text = (await response.text().catch(() => '')).slice(0, MAX_ERROR_CHARS);
-        this.logger.warn(`Chatwoot API ${options.method} failed with HTTP ${response.status}`);
-        throw new Error(`Chatwoot responded HTTP ${response.status}${text ? `: ${text}` : ''}`);
+    } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') {
+        throw new ChatwootApiError(
+          'CHATWOOT_TIMEOUT',
+          'Chatwoot did not respond before the request timed out.',
+        );
       }
-      return (await response.json()) as Result;
+      throw new ChatwootApiError(
+        'CHATWOOT_NETWORK_ERROR',
+        'Unable to reach the Chatwoot instance. Verify the URL and TLS certificate.',
+      );
     } finally {
       clearTimeout(timer);
     }
+  }
+
+  private toHttpError(status: number): ChatwootApiError {
+    if (status === HTTP_UNAUTHORIZED) {
+      return new ChatwootApiError(
+        'CHATWOOT_UNAUTHORIZED',
+        'Chatwoot rejected the API access token (HTTP 401). Verify the user access token.',
+        status,
+      );
+    }
+    if (status === HTTP_FORBIDDEN) {
+      return new ChatwootApiError(
+        'CHATWOOT_FORBIDDEN',
+        'The Chatwoot token does not have permission for this account or resource (HTTP 403).',
+        status,
+      );
+    }
+    if (status === HTTP_NOT_FOUND) {
+      return new ChatwootApiError(
+        'CHATWOOT_NOT_FOUND',
+        'Chatwoot endpoint or account was not found (HTTP 404). Verify the instance URL and account.',
+        status,
+      );
+    }
+    return new ChatwootApiError(
+      `CHATWOOT_HTTP_${status}`,
+      `Chatwoot API returned HTTP ${status}.`,
+      status,
+    );
   }
 }

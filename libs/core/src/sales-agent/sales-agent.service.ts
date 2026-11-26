@@ -250,6 +250,12 @@ export class SalesAgentService {
     if (connection.status === ChatwootConnectionStatus.DISABLED) {
       return { accepted: true, outcome: 'ignored', detail: 'connection_disabled' };
     }
+    if (!credentials.webhookSecret) {
+      this.logger.warn(
+        `Blocked Chatwoot webhook for connection ${connection.id}: webhook secret is not configured.`,
+      );
+      return { accepted: true, outcome: 'ignored', detail: 'webhook_auth_required' };
+    }
     if (!isIncomingBuyerMessage(payload)) {
       return { accepted: true, outcome: 'ignored', detail: 'not_incoming_buyer_message' };
     }
