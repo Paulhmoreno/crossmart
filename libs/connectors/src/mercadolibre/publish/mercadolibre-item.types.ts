@@ -20,10 +20,11 @@ export interface MercadoLibreSaleTermInput {
   value_name: string;
 }
 
-/** Shipping overrides sent only when explicitly configured on the store connection. */
+/** Shipping overrides sent when explicitly configured or resolved by shipping policy. */
 export interface MercadoLibreShippingInput {
   mode?: string;
   local_pick_up?: boolean;
+  free_shipping?: boolean;
 }
 
 /** A variation of a single item (sellers without User Products). */

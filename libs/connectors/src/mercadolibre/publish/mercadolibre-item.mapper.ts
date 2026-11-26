@@ -107,6 +107,7 @@ function configuredSaleTerms(settings: MercadoLibreSettings): MercadoLibreSaleTe
 function configuredShipping(
   settings: MercadoLibreSettings,
   category?: MercadoLibreCategory,
+  freeShipping?: boolean,
 ): MercadoLibreShippingInput | undefined {
   const shipping: MercadoLibreShippingInput = {};
   const allowedModes = category?.settings?.shipping_modes ?? [];
@@ -119,7 +120,28 @@ function configuredShipping(
   if (typeof settings.localPickUp === 'boolean') {
     shipping.local_pick_up = settings.localPickUp;
   }
+  if (typeof freeShipping === 'boolean') {
+    shipping.free_shipping = freeShipping;
+  }
   return Object.keys(shipping).length > 0 ? shipping : undefined;
+}
+
+/** Per-listing listing_type_id override via native item specifics, or store default. */
+export function resolveListingTypeId(draft: ListingDraft, settings: MercadoLibreSettings): string {
+  const specific = (draft.itemSpecifics ?? []).find((entry) => {
+    const key = entry.name.trim().toLowerCase();
+    return key === 'listing_type_id' || key === 'tipo de publicación' || key === 'listing type';
+  });
+  const override = specific?.values[0]?.trim();
+  if (override) {
+    const matched = (settings.availableListingTypes ?? []).find(
+      (option) =>
+        option.id.toLowerCase() === override.toLowerCase() ||
+        option.name.toLowerCase() === override.toLowerCase(),
+    );
+    return matched?.id ?? override;
+  }
+  return settings.defaultListingTypeId || MERCADOLIBRE_DEFAULT_LISTING_TYPE;
 }
 
 /** What every new item has: category, currency, configured listing type, terms, and shipping. */
@@ -128,14 +150,15 @@ export function newItemTerms(
   settings: MercadoLibreSettings,
   categoryId: string,
   category?: MercadoLibreCategory,
+  freeShipping?: boolean,
 ): MercadoLibreItemInput {
   const saleTerms = configuredSaleTerms(settings);
-  const shipping = configuredShipping(settings, category);
+  const shipping = configuredShipping(settings, category, freeShipping);
   return {
     category_id: categoryId,
     currency_id: settings.currencyCode,
     buying_mode: MercadoLibreBuyingMode.BuyItNow,
-    listing_type_id: settings.defaultListingTypeId || MERCADOLIBRE_DEFAULT_LISTING_TYPE,
+    listing_type_id: resolveListingTypeId(draft, settings),
     condition: mercadoLibreCondition(draft.condition),
     ...(saleTerms.length > 0 ? { sale_terms: saleTerms } : {}),
     ...(shipping ? { shipping } : {}),

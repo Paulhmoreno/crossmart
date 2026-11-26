@@ -3,10 +3,12 @@ import {
   type MercadoLibreListingTypeOption,
   type MercadoLibreSettings,
   MercadoLibreShippingMode,
+  MercadoLibreShippingPolicy,
   MercadoLibreSiteId,
 } from '@crossmart/connectors';
 import {
   MERCADOLIBRE_SHIPPING_MODE_SCHEMA_NAME,
+  MERCADOLIBRE_SHIPPING_POLICY_SCHEMA_NAME,
   MERCADOLIBRE_SITE_ID_SCHEMA_NAME,
 } from '../channels.constants.js';
 
@@ -65,16 +67,38 @@ export class MercadoLibreSettingsDto {
   @ApiProperty({
     type: String,
     nullable: true,
-    example: 'gold_special',
+    example: 'bronze',
     description: 'Default listing type id for new publications',
   })
   defaultListingTypeId: string | null;
 
   @ApiProperty({
+    enum: MercadoLibreShippingPolicy,
+    enumName: MERCADOLIBRE_SHIPPING_POLICY_SCHEMA_NAME,
+    nullable: true,
+    description: 'Commercial shipping policy: buyer pays, free shipping, or automatic',
+  })
+  shippingPolicy: MercadoLibreShippingPolicy | null;
+
+  @ApiProperty({
+    type: Number,
+    nullable: true,
+    description: 'Minimum listing price for automatic free shipping',
+  })
+  autoFreeShippingMinPrice: number | null;
+
+  @ApiProperty({
+    type: Number,
+    nullable: true,
+    description: 'Maximum acceptable shipping cost as percentage of sale price',
+  })
+  autoFreeShippingMaxCostPercent: number | null;
+
+  @ApiProperty({
     enum: MercadoLibreShippingMode,
     enumName: MERCADOLIBRE_SHIPPING_MODE_SCHEMA_NAME,
     nullable: true,
-    description: 'Shipping mode override; null lets Mercado Libre apply account defaults',
+    description: 'Internal shipping mode override; null lets Mercado Libre manage logistics',
   })
   shippingMode: MercadoLibreShippingMode | null;
 
@@ -118,6 +142,9 @@ export class MercadoLibreSettingsDto {
         MercadoLibreListingTypeOptionDto.from(option),
       ),
       defaultListingTypeId: settings.defaultListingTypeId ?? null,
+      shippingPolicy: settings.shippingPolicy ?? null,
+      autoFreeShippingMinPrice: settings.autoFreeShippingMinPrice ?? null,
+      autoFreeShippingMaxCostPercent: settings.autoFreeShippingMaxCostPercent ?? null,
       shippingMode: settings.shippingMode ?? null,
       localPickUp: settings.localPickUp ?? null,
       warrantyType: settings.warrantyType ?? null,

@@ -1,7 +1,13 @@
 import { Injectable } from '@nestjs/common';
 import {
+  computeMercadoLibreEconomics,
+  evaluateMercadoLibreShippingPolicy,
+  type MercadoLibreEconomicsSnapshot,
+  type MercadoLibreListingFeeQuote,
   type MercadoLibreListingSetupInput,
   type MercadoLibreSettings,
+  type MercadoLibreShippingCostQuote,
+  type MercadoLibreShippingDecision,
   MercadoLibreConnector,
   isMercadoLibreSettings,
 } from '@crossmart/connectors';
@@ -24,9 +30,27 @@ const MERCADOLIBRE_ACCOUNT: ConnectionAccountKind<MercadoLibreSettings> = {
   notThisChannel: 'This is not a Mercado Libre connection, or its account has not been read yet',
 };
 
+export interface MercadoLibreCommercialPreviewInput {
+  categoryId: string;
+  price: number;
+  unitCost?: number | null;
+  listingTypeId?: string;
+}
+
+export interface MercadoLibreCommercialPreviewResult {
+  categoryId: string;
+  currencyCode: string;
+  listingTypeId: string;
+  listingFees: MercadoLibreListingFeeQuote[];
+  shippingQuote: MercadoLibreShippingCostQuote;
+  shippingDecision: MercadoLibreShippingDecision;
+  economics: MercadoLibreEconomicsSnapshot;
+}
+
 /**
- * Commercial listing setup for a connected Mercado Libre store: explicit listing type,
- * shipping mode, local pickup, warranty terms, and order import safety switch.
+ * Commercial listing setup for a connected Mercado Libre store: Clásica/Premium default,
+ * commercial shipping policy (buyer pays, free, or automatic by price & real shipping cost),
+ * local pickup, warranty terms, and order import safety switch.
  */
 @Injectable()
 export class MercadoLibreSetupService {
@@ -47,7 +71,10 @@ export class MercadoLibreSetupService {
     const account: MercadoLibreSettings = {
       ...settings,
       defaultListingTypeId: input.defaultListingTypeId ?? null,
-      shippingMode: input.shippingMode ?? null,
+      shippingPolicy: input.shippingPolicy ?? null,
+      autoFreeShippingMinPrice: input.autoFreeShippingMinPrice ?? null,
+      autoFreeShippingMaxCostPercent: input.autoFreeShippingMaxCostPercent ?? null,
+      shippingMode: input.shippingMode ?? settings.shippingMode ?? null,
       localPickUp: input.localPickUp ?? null,
       warrantyType: input.warrantyType?.trim() || null,
       warrantyTime: input.warrantyTime?.trim() || null,
@@ -76,6 +103,49 @@ export class MercadoLibreSetupService {
       availableListingTypes,
     };
     return this.store.saveAccount(workspaceId, connection, account);
+  }
+
+  /** Read-only commercial preview: real ML fees, real shipping quote, policy decision, and margin. */
+  async previewCommercialTerms(
+    workspaceId: string,
+    connectionId: string,
+    input: MercadoLibreCommercialPreviewInput,
+  ): Promise<MercadoLibreCommercialPreviewResult> {
+    const { settings } = await this.load(workspaceId, connectionId);
+    const session = await this.sessions.open(workspaceId, connectionId);
+    const listingTypeId = input.listingTypeId || settings.defaultListingTypeId || 'bronze';
+    const { listingFees, shippingQuote } = await callChannel(() =>
+      this.mercadoLibre.readCommercialQuote(session, {
+        categoryId: input.categoryId,
+        price: input.price,
+        listingTypeId,
+      }),
+    );
+    const shippingDecision = evaluateMercadoLibreShippingPolicy(
+      settings,
+      input.price,
+      shippingQuote,
+    );
+    const matchedFee = listingFees.find((fee) => fee.listingTypeId === listingTypeId);
+    const sellerShippingCost =
+      shippingDecision.freeShipping && shippingQuote.available && shippingQuote.sellerCost !== null
+        ? shippingQuote.sellerCost
+        : 0;
+    const economics = computeMercadoLibreEconomics({
+      price: input.price,
+      unitCost: input.unitCost ?? null,
+      saleFeeAmount: matchedFee?.saleFeeAmount ?? 0,
+      sellerShippingCost,
+    });
+    return {
+      categoryId: input.categoryId,
+      currencyCode: settings.currencyCode,
+      listingTypeId,
+      listingFees,
+      shippingQuote,
+      shippingDecision,
+      economics,
+    };
   }
 
   private load(

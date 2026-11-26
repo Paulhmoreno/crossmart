@@ -32,6 +32,8 @@ export enum MercadoLibrePathParam {
 export const MERCADOLIBRE_ME_PATH = '/users/me';
 export const MERCADOLIBRE_GRANT_PATH = '/users/{user_id}/applications/{app_id}';
 export const MERCADOLIBRE_SITE_LISTING_TYPES_PATH = '/sites/{site_id}/listing_types';
+export const MERCADOLIBRE_SITE_LISTING_PRICES_PATH = '/sites/{site_id}/listing_prices';
+export const MERCADOLIBRE_USER_FREE_SHIPPING_PATH = '/users/{user_id}/shipping_options/free';
 export const MERCADOLIBRE_DOMAIN_DISCOVERY_PATH = '/sites/{site_id}/domain_discovery/search';
 export const MERCADOLIBRE_CATEGORY_PATH = '/categories/{category_id}';
 export const MERCADOLIBRE_CATEGORY_ATTRIBUTES_PATH = '/categories/{category_id}/attributes';
@@ -58,6 +60,13 @@ export enum MercadoLibreQueryParam {
   Sort = 'sort',
   LastUpdatedFrom = 'order.date_last_updated.from',
   ApiVersion = 'api_version',
+  Price = 'price',
+  ItemPrice = 'item_price',
+  CategoryId = 'category_id',
+  CurrencyId = 'currency_id',
+  ListingTypeId = 'listing_type_id',
+  Condition = 'condition',
+  Dimensions = 'dimensions',
 }
 
 /** `api_version=2` makes description errors name the character at fault. */

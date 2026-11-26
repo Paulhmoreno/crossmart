@@ -14,19 +14,27 @@ export enum MercadoLibreCondition {
   Used = 'used',
 }
 
-/** `listing_type_id`: `gold_special` is Clásica (Classic), `gold_pro` Premium, `free` Free. */
+/** `listing_type_id`: `bronze` is Clásica in MEC; `gold_special`/`gold_pro` vary by site. */
 export enum MercadoLibreListingType {
   Free = 'free',
+  Bronze = 'bronze',
   Classic = 'gold_special',
   Premium = 'gold_pro',
 }
 
-/** Shipping modes accepted by Mercado Libre (`shipping.mode`). */
+/** Shipping modes accepted internally by Mercado Libre (`shipping.mode`). */
 export enum MercadoLibreShippingMode {
   Me2 = 'me2',
   Me1 = 'me1',
   Custom = 'custom',
   NotSpecified = 'not_specified',
+}
+
+/** Commercial shipping policy chosen by the merchant for Mercado Libre listings. */
+export enum MercadoLibreShippingPolicy {
+  BuyerPays = 'buyer_pays',
+  FreeShipping = 'free_shipping',
+  Automatic = 'automatic',
 }
 
 /** Crossmart lists at a fixed price only. */

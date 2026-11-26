@@ -16,12 +16,21 @@ import {
   USER_ID,
   VALIDATE_ITEMS_URL,
 } from './mercadolibre.fixtures.js';
-import { MercadoLibreListingType, MercadoLibreShippingMode } from './mercadolibre.enums.js';
+import {
+  MercadoLibreListingType,
+  MercadoLibreShippingMode,
+  MercadoLibreShippingPolicy,
+} from './mercadolibre.enums.js';
 import { MercadoLibreSiteId } from './mercadolibre-site.js';
+import {
+  computeMercadoLibreEconomics,
+  evaluateMercadoLibreShippingPolicy,
+} from './publish/mercadolibre-commercial.client.js';
 import {
   adaptMercadoLibreDescription,
   adaptMercadoLibreTitle,
 } from './publish/mercadolibre-content.adapter.js';
+import { resolveListingTypeId } from './publish/mercadolibre-item.mapper.js';
 import {
   describeMercadoLibreModeration,
   isMercadoLibreItemLive,
@@ -322,5 +331,99 @@ describe('Mercado Libre Ecuador (MEC) completion', () => {
     };
     expect(isMercadoLibreItemLive(moderated)).toBe(false);
     expect(describeMercadoLibreModeration(moderated)).toContain('suspended');
+  });
+
+  it('evaluates automatic shipping policy using only real quotes and computes economics accurately', () => {
+    const autoSettings = {
+      shippingPolicy: MercadoLibreShippingPolicy.Automatic,
+      autoFreeShippingMinPrice: 25,
+      autoFreeShippingMaxCostPercent: 12,
+    };
+
+    // Never assumes free when shipping quote fails/unavailable
+    expect(
+      evaluateMercadoLibreShippingPolicy(autoSettings, 40, {
+        available: false,
+        listCost: null,
+        sellerCost: null,
+        discountRate: null,
+        promotedAmount: null,
+        currencyId: null,
+        mandatoryFreeShipping: false,
+        errorReason: 'timeout',
+      }),
+    ).toMatchObject({ freeShipping: false, reason: 'shipping_quote_unavailable' });
+
+    // Below min price threshold -> buyer pays
+    expect(
+      evaluateMercadoLibreShippingPolicy(autoSettings, 15, {
+        available: true,
+        listCost: 3,
+        sellerCost: 1.5,
+        discountRate: 50,
+        promotedAmount: 1.5,
+        currencyId: 'USD',
+        mandatoryFreeShipping: false,
+        errorReason: null,
+      }),
+    ).toMatchObject({ freeShipping: false, reason: 'below_min_price_threshold' });
+
+    // Within min price and max cost % -> free shipping enabled
+    expect(
+      evaluateMercadoLibreShippingPolicy(autoSettings, 40, {
+        available: true,
+        listCost: 5,
+        sellerCost: 3.5,
+        discountRate: 30,
+        promotedAmount: 1.5,
+        currencyId: 'USD',
+        mandatoryFreeShipping: false,
+        errorReason: null,
+      }),
+    ).toMatchObject({ freeShipping: true, reason: 'within_auto_cost_threshold' });
+
+    // Fully covered by ML (sellerCost === 0) above min price -> free shipping enabled
+    expect(
+      evaluateMercadoLibreShippingPolicy(autoSettings, 30, {
+        available: true,
+        listCost: 4,
+        sellerCost: 0,
+        discountRate: 100,
+        promotedAmount: 4,
+        currencyId: 'USD',
+        mandatoryFreeShipping: false,
+        errorReason: null,
+      }),
+    ).toMatchObject({ freeShipping: true, reason: 'fully_covered_by_channel' });
+
+    // Internal profitability snapshot
+    const econ = computeMercadoLibreEconomics({
+      price: 50,
+      unitCost: 22,
+      saleFeeAmount: 7.5,
+      sellerShippingCost: 3.5,
+    });
+    expect(econ).toEqual({
+      price: 50,
+      unitCost: 22,
+      saleFeeAmount: 7.5,
+      sellerShippingCost: 3.5,
+      netProceeds: 39,
+      estimatedMarginAmount: 17,
+      estimatedMarginPercent: 34,
+    });
+
+    // Per-listing exception via native item specifics
+    const draft = listingDraft({
+      itemSpecifics: [{ name: 'Tipo de publicación', values: ['Premium'] }],
+    });
+    const settings = mercadoLibreSettings({
+      defaultListingTypeId: 'bronze',
+      availableListingTypes: [
+        { id: 'bronze', name: 'Clásica' },
+        { id: 'gold_pro', name: 'Premium' },
+      ],
+    });
+    expect(resolveListingTypeId(draft, settings)).toBe('gold_pro');
   });
 });

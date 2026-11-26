@@ -29,6 +29,7 @@ import {
   CHANNELS_TAG,
   CONNECTION_ID_PARAM,
   MERCADOLIBRE_APP_CONFIG_PATH,
+  MERCADOLIBRE_COMMERCIAL_PREVIEW_PATH,
   MERCADOLIBRE_LISTING_SETUP_PATH,
   MERCADOLIBRE_REFRESH_PATH,
 } from '../channels.constants.js';
@@ -140,5 +141,26 @@ export class MercadoLibreAccountController {
   ): Promise<ChannelConnectionDto> {
     const saved = await this.setup.refreshListingTypes(workspaceId, connectionId);
     return ChannelConnectionDto.from(saved);
+  }
+
+  @Post(MERCADOLIBRE_COMMERCIAL_PREVIEW_PATH)
+  @RequirePermission(WorkspacePermission.ViewChannels)
+  @ApiOperation({
+    summary: 'Preview real Mercado Libre fees, shipping cost, and margin (read-only)',
+    description:
+      'Queries live listing_prices and account shipping_options/free without modifying any listing.',
+  })
+  async previewCommercialTerms(
+    @Param(WORKSPACE_ID_PARAM, ParseUUIDPipe) workspaceId: string,
+    @Param(CONNECTION_ID_PARAM, ParseUUIDPipe) connectionId: string,
+    @Body()
+    body: {
+      categoryId: string;
+      price: number;
+      unitCost?: number | null;
+      listingTypeId?: string;
+    },
+  ) {
+    return this.setup.previewCommercialTerms(workspaceId, connectionId, body);
   }
 }

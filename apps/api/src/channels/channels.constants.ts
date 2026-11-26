@@ -47,8 +47,10 @@ export const CONNECT_FAILURE_SCHEMA_NAME = 'ConnectFailure';
 export const EBAY_MARKETPLACE_ID_SCHEMA_NAME = 'EbayMarketplaceId';
 export const MERCADOLIBRE_SITE_ID_SCHEMA_NAME = 'MercadoLibreSiteId';
 export const MERCADOLIBRE_SHIPPING_MODE_SCHEMA_NAME = 'MercadoLibreShippingMode';
+export const MERCADOLIBRE_SHIPPING_POLICY_SCHEMA_NAME = 'MercadoLibreShippingPolicy';
 export const MERCADOLIBRE_LISTING_SETUP_PATH = `:${CONNECTION_ID_PARAM}/mercado-libre/listing-setup`;
 export const MERCADOLIBRE_REFRESH_PATH = `:${CONNECTION_ID_PARAM}/mercado-libre/refresh`;
+export const MERCADOLIBRE_COMMERCIAL_PREVIEW_PATH = `:${CONNECTION_ID_PARAM}/mercado-libre/commercial-preview`;
 export const MERCADOLIBRE_APP_CONFIG_PATH = 'mercado-libre/app-config';
 /** Imports of a connection's catalog, under the connection. */
 export const CHANNEL_IMPORTS_PATH = `:${CONNECTION_ID_PARAM}/imports`;

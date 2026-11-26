@@ -3,6 +3,7 @@ import { MercadoLibreUserReader } from './account/mercadolibre-user.reader.js';
 import { MercadoLibreInventorySync } from './inventory/mercadolibre-inventory-sync.js';
 import { MercadoLibreNotificationParser } from './notifications/mercadolibre-notification.parser.js';
 import { MercadoLibreOrderSource } from './orders/mercadolibre-order-source.js';
+import { MercadoLibreCommercialClient } from './publish/mercadolibre-commercial.client.js';
 import { MercadoLibreListingPublisher } from './publish/mercadolibre-listing-publisher.js';
 import { MercadoLibrePriceUpdater } from './publish/mercadolibre-price-updater.js';
 import { MercadoLibreCategoryReader } from './taxonomy/mercadolibre-category.reader.js';
@@ -16,6 +17,7 @@ export class MercadoLibreSellingServices {
     readonly prices: MercadoLibrePriceUpdater,
     readonly categories: MercadoLibreCategoryReader,
     readonly attributes: MercadoLibreCategoryAttributesReader,
+    readonly commercial: MercadoLibreCommercialClient,
   ) {}
 }
 

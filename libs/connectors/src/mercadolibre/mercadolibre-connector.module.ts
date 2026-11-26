@@ -14,6 +14,7 @@ import { MercadoLibreNotificationParser } from './notifications/mercadolibre-not
 import { MercadoLibreOAuthClient } from './oauth/mercadolibre-oauth.client.js';
 import { MercadoLibreOrderSource } from './orders/mercadolibre-order-source.js';
 import { MercadoLibreCatalogMatcher } from './publish/mercadolibre-catalog.matcher.js';
+import { MercadoLibreCommercialClient } from './publish/mercadolibre-commercial.client.js';
 import { MercadoLibreItemClient } from './publish/mercadolibre-item.client.js';
 import { MercadoLibreItemLifecycle } from './publish/mercadolibre-item-lifecycle.js';
 import { MercadoLibreItemVerifier } from './publish/mercadolibre-item.verifier.js';
@@ -44,6 +45,7 @@ import { MercadoLibreCategoryAttributesReader } from './taxonomy/mercadolibre-ca
     MercadoLibreItemLifecycle,
     MercadoLibreItemVerifier,
     MercadoLibreCatalogMatcher,
+    MercadoLibreCommercialClient,
     MercadoLibreMediaUploader,
     MercadoLibreSingleItemWriter,
     MercadoLibreUserProductWriter,

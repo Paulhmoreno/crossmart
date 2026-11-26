@@ -207,6 +207,35 @@ export class MercadoLibreConnector
     return this.sync.user.readListingTypes(await session.accessToken(), settings.siteId);
   }
 
+  /** Read-only commercial quote: real ML listing fees + account shipping cost for a category/price. */
+  async readCommercialQuote(
+    session: ChannelSession,
+    params: { categoryId: string; price: number; listingTypeId?: string; condition?: string },
+  ) {
+    const settings = requireMercadoLibreSettings(session.settings);
+    const accessToken = await session.accessToken();
+    const listingTypeId = params.listingTypeId || settings.defaultListingTypeId || 'bronze';
+    const [listingFees, shippingQuote] = await Promise.all([
+      this.selling.commercial.readListingFees({
+        accessToken,
+        siteId: settings.siteId,
+        currencyId: settings.currencyCode,
+        categoryId: params.categoryId,
+        price: params.price,
+      }),
+      this.selling.commercial.readShippingCost({
+        accessToken,
+        userId: settings.userId,
+        categoryId: params.categoryId,
+        listingTypeId,
+        price: params.price,
+        currencyId: settings.currencyCode,
+        condition: params.condition ?? 'new',
+      }),
+    ]);
+    return { listingFees, shippingQuote };
+  }
+
   parseSettings(raw: unknown): MercadoLibreSettings {
     return parseMercadoLibreSettings(raw);
   }
