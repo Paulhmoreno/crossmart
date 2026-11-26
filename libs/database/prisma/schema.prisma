@@ -1948,3 +1948,22 @@ model WorkspaceAiConfig {
 
   @@map("workspace_ai_configs")
 }
+
+// ─── Instance Channel OAuth App Configuration ─────────────────────────────────
+
+/// Instance-level OAuth app credentials configured in self-hosted mode (e.g. Mercado Libre).
+/// Secrets are sealed with `EnvelopeEncryption` using `encryptionWorkspaceId` as the data-key owner.
+model ChannelAppConfig {
+  /// Channel identifier (`mercado_libre`, etc.).
+  channel               String   @id
+  clientId              String   @map("client_id")
+  /// Sealed Secret Key encrypted with `EnvelopeEncryption`. Never returned to clients.
+  sealedSecret          String   @map("sealed_secret")
+  /// Workspace whose data key wraps `sealedSecret` via `EnvelopeEncryption`.
+  encryptionWorkspaceId String   @map("encryption_workspace_id") @db.Uuid
+  updatedById           String?  @map("updated_by_id") @db.Uuid
+  createdAt             DateTime @default(now()) @map("created_at")
+  updatedAt             DateTime @updatedAt @map("updated_at")
+
+  @@map("channel_app_configs")
+}

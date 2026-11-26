@@ -162,17 +162,24 @@ export class MercadoLibreConnector
     };
   }
 
-  refreshCredentials(
+  async refreshCredentials(
     _externalAccountId: string,
     credentials: ChannelCredentials,
   ): Promise<ChannelCredentials> {
+    await this.app.reload();
     return this.oauth.refresh(credentials);
   }
 
   /** Removes the app's authorization from the seller's account. */
   async revokeAccess(session: ChannelSession): Promise<void> {
+    await this.app.reload();
     const appId = this.app.settings().clientId;
     await this.sync.user.revokeGrant(await session.accessToken(), session.externalAccountId, appId);
+  }
+
+  /** Reloads stored OAuth app credentials dynamically (used before starting/completing OAuth). */
+  async reloadAppCredentials(): Promise<void> {
+    await this.app.reload();
   }
 
   async describeAccount(

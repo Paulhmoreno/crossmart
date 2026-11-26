@@ -28,6 +28,7 @@ import { EbayAccountSetupService } from './ebay/services/ebay-account-setup.serv
 import { EbayDeletionChallengeService } from './ebay/services/ebay-deletion-challenge.service.js';
 import { GoogleMerchantSetupService } from './google-merchant/services/google-merchant-setup.service.js';
 import { EtsyShopSetupService } from './etsy/services/etsy-shop-setup.service.js';
+import { MercadoLibreAppConfigService } from './mercadolibre/services/mercadolibre-app-config.service.js';
 import { MercadoLibreSetupService } from './mercadolibre/services/mercadolibre-setup.service.js';
 
 /**
@@ -67,6 +68,7 @@ import { MercadoLibreSetupService } from './mercadolibre/services/mercadolibre-s
     EbayDeletionChallengeService,
     GoogleMerchantSetupService,
     EtsyShopSetupService,
+    MercadoLibreAppConfigService,
     MercadoLibreSetupService,
   ],
   exports: [
@@ -79,6 +81,7 @@ import { MercadoLibreSetupService } from './mercadolibre/services/mercadolibre-s
     EbayDeletionChallengeService,
     GoogleMerchantSetupService,
     EtsyShopSetupService,
+    MercadoLibreAppConfigService,
     MercadoLibreSetupService,
     ChannelSessionFactory,
     ChannelConnectionRepository,

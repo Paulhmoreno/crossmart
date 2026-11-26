@@ -1,12 +1,19 @@
-import { Injectable, Logger, NotFoundException, UnauthorizedException } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  NotFoundException,
+  Optional,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { ReplayGuard } from '@crossmart/common';
 import {
   ChannelCapability,
   type ChannelConnector,
   ChannelConnectorRegistry,
-  type ChannelType,
+  ChannelType,
   type ChannelWebhookEvent,
   type IncomingWebhook,
+  MercadoLibreApp,
   supportsCapability,
 } from '@crossmart/connectors';
 import {
@@ -30,10 +37,14 @@ export class ChannelWebhooksService {
     private readonly registry: ChannelConnectorRegistry,
     private readonly dispatcher: ChannelWebhookDispatcher,
     private readonly deliveries: ReplayGuard,
+    @Optional() private readonly mercadoLibreApp?: MercadoLibreApp,
   ) {}
 
   /** Throws 401 when the signature does not verify; otherwise acknowledges every topic. */
   async handle(channel: ChannelType, webhook: IncomingWebhook): Promise<void> {
+    if (channel === ChannelType.MercadoLibre) {
+      await this.mercadoLibreApp?.reload();
+    }
     const connector = this.registry.require(channel);
     if (!supportsCapability(connector, ChannelCapability.ReceiveWebhooks)) {
       throw new NotFoundException(`${connector.displayName} does not send webhooks`);

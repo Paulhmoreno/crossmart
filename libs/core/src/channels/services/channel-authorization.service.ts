@@ -1,5 +1,5 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
-import type { ChannelType, OAuthAppConnector } from '@crossmart/connectors';
+import { BadRequestException, Injectable, Optional } from '@nestjs/common';
+import { ChannelType, MercadoLibreApp, type OAuthAppConnector } from '@crossmart/connectors';
 import { ActivityOutcome } from '@crossmart/database';
 import { Actor } from '../../activity/entities/actor.js';
 import { ActivityAction } from '../../activity/enums/activity-action.enum.js';
@@ -45,6 +45,7 @@ export class ChannelAuthorizationService {
     private readonly states: OAuthStateService,
     private readonly accounts: ConnectedAccountWriter,
     private readonly activity: ActivityRecorder,
+    @Optional() private readonly mercadoLibreApp?: MercadoLibreApp,
   ) {}
 
   /** Throws `EntitlementExceededException` (HTTP 402) when the plan has no room for it. */
@@ -53,6 +54,9 @@ export class ChannelAuthorizationService {
     userId: string,
     request: AuthorizationRequest,
   ): Promise<AuthorizationStart> {
+    if (request.channel === ChannelType.MercadoLibre) {
+      await this.mercadoLibreApp?.reload();
+    }
     const connector = this.connectors.requireReady(request.channel);
     const accountHandle = connector.normalizeAccountHandle(request.accountHandle);
     if (!accountHandle) {
@@ -102,6 +106,9 @@ export class ChannelAuthorizationService {
   ): Promise<CompletedAuthorization> {
     if (query[ERROR_PARAM]) {
       throw new ChannelConnectError(ConnectFailure.AccessDenied);
+    }
+    if (state.channel === ChannelType.MercadoLibre) {
+      await this.mercadoLibreApp?.reload();
     }
     const connector = this.connectors.requireReady(state.channel);
     // The connector checks that the channel answered for the account the merchant named.

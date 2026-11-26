@@ -49,6 +49,7 @@ export const MERCADOLIBRE_SITE_ID_SCHEMA_NAME = 'MercadoLibreSiteId';
 export const MERCADOLIBRE_SHIPPING_MODE_SCHEMA_NAME = 'MercadoLibreShippingMode';
 export const MERCADOLIBRE_LISTING_SETUP_PATH = `:${CONNECTION_ID_PARAM}/mercado-libre/listing-setup`;
 export const MERCADOLIBRE_REFRESH_PATH = `:${CONNECTION_ID_PARAM}/mercado-libre/refresh`;
+export const MERCADOLIBRE_APP_CONFIG_PATH = 'mercado-libre/app-config';
 /** Imports of a connection's catalog, under the connection. */
 export const CHANNEL_IMPORTS_PATH = `:${CONNECTION_ID_PARAM}/imports`;
 /** eBay-only setup of a connection, under the connection. */

@@ -57,6 +57,6 @@ import { MercadoLibreCategoryAttributesReader } from './taxonomy/mercadolibre-ca
     MercadoLibreSyncServices,
     MercadoLibreConnector,
   ],
-  exports: [MercadoLibreConnector],
+  exports: [MercadoLibreConnector, MercadoLibreApp],
 })
 export class MercadoLibreConnectorModule {}
