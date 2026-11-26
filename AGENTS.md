@@ -22,5 +22,6 @@ Read [CLAUDE.md](CLAUDE.md), [CONTRIBUTING.md](CONTRIBUTING.md) and [IMPLEMENTAT
 - Keep commercial product content and agent output language separate from the interface locale. Do not regenerate or translate saved product content on a UI language change.
 - Never remove validation, authorization, meaningful errors or ERP source ownership protections during visual cleanup. Do not build extra UI explanations for backend safeguards.
 - Settings screens must be limited to configuring services and integrations, without duplicating operational modules, product listings, or dashboards.
+- Channel cards in Stores (including WooCommerce, Mercado Libre, and future integrations) must use brief single-sentence descriptions matching native channels, visually balanced official logos inside the native container, and identical shared card structure.
 
 Code, commits and repository documentation are in English, as required upstream.
