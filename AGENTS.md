@@ -23,5 +23,6 @@ Read [CLAUDE.md](CLAUDE.md), [CONTRIBUTING.md](CONTRIBUTING.md) and [IMPLEMENTAT
 - Never remove validation, authorization, meaningful errors or ERP source ownership protections during visual cleanup. Do not build extra UI explanations for backend safeguards.
 - Settings screens must be limited to configuring services and integrations, without duplicating operational modules, product listings, or dashboards.
 - Channel cards in Stores (including WooCommerce, Mercado Libre, and future integrations) must use brief single-sentence descriptions matching native channels, visually balanced official logos inside the native container, and identical shared card structure.
+- Keep operational self-hosted features strictly separate from SaaS commercial surfaces. Use native `BILLING_DRIVER=none` and `ENTITLEMENTS_ENFORCED=false` for self-hosted operation; keep backend billing modules, models, and contracts intact while hiding commercial billing, SaaS support escalations, marketplace request links, and incomplete connector previews from the operational UI. All future implementations must respect upstream design, centralized i18n, and the self-hosted context.
 
 Code, commits and repository documentation are in English, as required upstream.
