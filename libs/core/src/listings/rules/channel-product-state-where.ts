@@ -97,13 +97,14 @@ export function channelProductStateOf(
   return removedByHand ? ChannelProductState.RemovedByHand : ChannelProductState.Excluded;
 }
 
-/** The listing a row shows: a failed one first, then one on the channel, else the latest. */
+/** The listing a row shows: a failed one first, then active, then inactive on the channel, else the latest. */
 export function shownListing<TListing extends ListingWithStatus>(
   listings: readonly TListing[],
 ): TListing | null {
   return (
     listings.find((listing) => listing.status === ListingStatus.ERROR) ??
-    listings.find((listing) => ON_CHANNEL_STATUSES.includes(listing.status)) ??
+    listings.find((listing) => listing.status === ListingStatus.ACTIVE) ??
+    listings.find((listing) => listing.status === ListingStatus.INACTIVE) ??
     listings[0] ??
     null
   );

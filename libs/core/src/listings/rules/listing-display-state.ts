@@ -49,11 +49,17 @@ function unsentDisplay(input: ListingDisplayInput): ListingDisplay {
   return display(queued ? ListingDisplayState.Publishing : ListingDisplayState.Ready);
 }
 
-/** A listing the channel holds: published, publishing again while a sync updates it, or removing. */
+/**
+ * A listing the channel holds: published when ACTIVE, draft when INACTIVE (e.g. WooCommerce draft),
+ * publishing while a sync updates it, or removing once no longer selected.
+ */
 function heldDisplay(input: ListingDisplayInput): ListingDisplay {
   if (!input.selected) return display(ListingDisplayState.Removing);
+  if (isSyncQueued(input.listing)) return display(ListingDisplayState.Publishing);
   return display(
-    isSyncQueued(input.listing) ? ListingDisplayState.Publishing : ListingDisplayState.Published,
+    input.listing?.status === ListingStatus.INACTIVE
+      ? ListingDisplayState.Draft
+      : ListingDisplayState.Published,
   );
 }
 

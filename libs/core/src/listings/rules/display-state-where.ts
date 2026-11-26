@@ -12,7 +12,7 @@ import {
  * tell, so these narrow a query to the products that may have it; the rest is decided in code.
  */
 const DISPLAY_STATE_SOURCES: Record<ListingDisplayState, readonly ChannelProductState[]> = {
-  [ListingDisplayState.Draft]: [ChannelProductState.Excluded],
+  [ListingDisplayState.Draft]: [ChannelProductState.Excluded, ChannelProductState.Listed],
   [ListingDisplayState.NeedsDetails]: [ChannelProductState.Pending, ChannelProductState.Failed],
   [ListingDisplayState.Ready]: [ChannelProductState.Pending],
   [ListingDisplayState.Publishing]: [

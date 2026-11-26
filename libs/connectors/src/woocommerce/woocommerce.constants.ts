@@ -15,8 +15,10 @@ export const WOOCOMMERCE_RATE_RESTORE_PER_SECOND = 5;
 
 export const WOOCOMMERCE_INVENTORY_BATCH_SIZE = 50;
 export const WOOCOMMERCE_CATALOG_PAGE_SIZE = 50;
+export const WOOCOMMERCE_VARIATIONS_PAGE_SIZE = 100;
+export const WOOCOMMERCE_MAX_VARIATION_PAGES = 50;
 export const WOOCOMMERCE_TAXONOMY_PAGE_SIZE = 100;
-export const WOOCOMMERCE_MAX_TAXONOMY_PAGES = 10;
+export const WOOCOMMERCE_MAX_TAXONOMY_PAGES = 20;
 export const WOOCOMMERCE_MAX_IMAGES = 20;
 export const WOOCOMMERCE_MAX_TAGS = 30;
 export const WOOCOMMERCE_MAX_TITLE_LENGTH = 255;
@@ -30,6 +32,10 @@ export const WOOCOMMERCE_STATUS_MAX_LENGTH = 32;
 
 export const WOOCOMMERCE_META_PRODUCT_ID = '_crossmart_product_id';
 export const WOOCOMMERCE_META_MEDIA_MAP = '_crossmart_media_map';
+export const WOOCOMMERCE_META_AUTO_CATEGORY_ID = '_crossmart_auto_category_id';
+export const WOOCOMMERCE_META_MANAGED_TAGS = '_crossmart_managed_tags';
+export const WOOCOMMERCE_META_MANAGED_ATTRIBUTES = '_crossmart_managed_attributes';
+export const WOOCOMMERCE_META_MANAGED_BRAND = '_crossmart_managed_brand';
 export const WOOCOMMERCE_INVENTORY_ID_SEPARATOR = ':';
 export const WOOCOMMERCE_DEFAULT_CURRENCY = 'USD';
 export const WOOCOMMERCE_DEFAULT_WEIGHT_UNIT = 'kg';

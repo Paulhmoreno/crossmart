@@ -13,7 +13,10 @@ import type { WooProduct, WooVariation } from '../api/woocommerce-api.types.js';
 import {
   WOOCOMMERCE_CATALOG_PAGE_SIZE,
   WOOCOMMERCE_INVENTORY_ID_SEPARATOR,
+  WOOCOMMERCE_MAX_VARIATION_PAGES,
+  WOOCOMMERCE_VARIATIONS_PAGE_SIZE,
 } from '../woocommerce.constants.js';
+import { decodeHtmlEntities } from '../taxonomy/woocommerce-taxonomy.provider.js';
 
 const FIRST_PAGE = 1;
 const DECIMAL_PLACES = 2;
@@ -181,9 +184,14 @@ export class WooCommerceCatalogSource implements CatalogSource {
       variants = [mapSimpleVariant(product, account.weightUnit)];
     }
 
-    const primaryCategory = product.categories?.[0]?.name?.trim() ?? null;
+    const primaryCategory = product.categories?.[0]?.name?.trim()
+      ? decodeHtmlEntities(product.categories[0].name).trim()
+      : null;
+    const primaryBrand = product.brands?.[0]?.name?.trim()
+      ? decodeHtmlEntities(product.brands[0].name).trim()
+      : null;
     const tags = (product.tags ?? [])
-      .map((tag) => tag.name?.trim() ?? '')
+      .map((tag) => (tag.name?.trim() ? decodeHtmlEntities(tag.name).trim() : ''))
       .filter((name) => name.length > 0);
     const images = (product.images ?? [])
       .filter((img) => Boolean(img.src?.trim()))
@@ -195,9 +203,11 @@ export class WooCommerceCatalogSource implements CatalogSource {
     return {
       externalId: String(product.id),
       handle: product.slug?.trim() || `woocommerce-${product.id}`,
-      title: product.name?.trim() || `Producto ${product.id}`,
+      title: product.name?.trim()
+        ? decodeHtmlEntities(product.name).trim()
+        : `Producto ${product.id}`,
       descriptionHtml: product.description ?? '',
-      vendor: null,
+      vendor: primaryBrand,
       productType: primaryCategory,
       tags,
       active: product.status === 'publish',
@@ -212,11 +222,18 @@ export class WooCommerceCatalogSource implements CatalogSource {
     account: { storeUrl: string; consumerKey: string; consumerSecret: string },
     productId: number,
   ): Promise<WooVariation[]> {
-    const response = await this.api.request<WooVariation[]>(
-      account,
-      HttpMethod.Get,
-      `/products/${productId}/variations?per_page=100`,
-    );
-    return Array.isArray(response.data) ? response.data : [];
+    const all: WooVariation[] = [];
+    for (let page = FIRST_PAGE; page <= WOOCOMMERCE_MAX_VARIATION_PAGES; page += 1) {
+      const response = await this.api.request<WooVariation[]>(
+        account,
+        HttpMethod.Get,
+        `/products/${productId}/variations?per_page=${WOOCOMMERCE_VARIATIONS_PAGE_SIZE}&page=${page}`,
+      );
+      const rows = Array.isArray(response.data) ? response.data : [];
+      all.push(...rows);
+      const totalPages = Number.parseInt(response.headers['x-wp-totalpages'] ?? '1', 10) || 1;
+      if (rows.length < WOOCOMMERCE_VARIATIONS_PAGE_SIZE || page >= totalPages) break;
+    }
+    return all;
   }
 }

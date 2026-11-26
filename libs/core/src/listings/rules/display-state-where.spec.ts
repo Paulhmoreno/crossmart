@@ -46,6 +46,12 @@ describe('displayStateSources', () => {
   });
 
   it('keeps products removed by hand out of drafts', () => {
-    expect(displayStateSources(ListingDisplayState.Draft)).toEqual([ChannelProductState.Excluded]);
+    expect(displayStateSources(ListingDisplayState.Draft)).toEqual([
+      ChannelProductState.Excluded,
+      ChannelProductState.Listed,
+    ]);
+    expect(displayStateSources(ListingDisplayState.Draft)).not.toContain(
+      ChannelProductState.RemovedByHand,
+    );
   });
 });

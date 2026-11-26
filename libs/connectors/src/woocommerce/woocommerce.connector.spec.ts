@@ -185,7 +185,13 @@ describe('WooCommerceConnector', () => {
     const { http, connector } = createHarness(localStorage);
 
     // 1. Without WordPress Media auth, a localhost image MUST fail with PublishRequirement.Images
-    http.expect(HttpMethod.Get, /\/wp-json\/wc\/v3\/products\?sku=/, jsonResponse([]));
+    http
+      .expect(HttpMethod.Get, /\/wp-json\/wc\/v3\/products\?sku=/, jsonResponse([]))
+      .expect(
+        HttpMethod.Get,
+        /\/wp-json\/wc\/v3\/products\/brands\?slug=brand/,
+        jsonResponse([{ id: 33, name: 'Brand', slug: 'brand' }]),
+      );
     await expect(
       connector.publish(makeSession(false), {
         productId: 'prod-1',
@@ -224,6 +230,11 @@ describe('WooCommerceConnector', () => {
     http
       .expect(HttpMethod.Get, /\/wp-json\/wc\/v3\/products\?sku=/, jsonResponse([]))
       .expect(
+        HttpMethod.Get,
+        /\/wp-json\/wc\/v3\/products\/brands\?slug=brand/,
+        jsonResponse([{ id: 33, name: 'Brand', slug: 'brand' }]),
+      )
+      .expect(
         HttpMethod.Post,
         /\/wp-json\/wp\/v2\/media$/,
         jsonResponse(
@@ -250,8 +261,19 @@ describe('WooCommerceConnector', () => {
         /\/wp-json\/wc\/v3\/products\/501/,
         jsonResponse({
           id: 501,
+          name: 'Sample Item',
           permalink: 'https://store.example.com/product/sample-item/',
           status: 'draft',
+          description: '<p>Details</p>',
+          short_description: '<p>Details</p>',
+          sku: 'SKU-001',
+          global_unique_id: '0000000000001',
+          regular_price: '19.00',
+          sale_price: '15.00',
+          manage_stock: true,
+          stock_quantity: 4,
+          stock_status: 'instock',
+          brands: [{ id: 33, name: 'Brand', slug: 'brand' }],
           images: [{ id: 777, src: 'https://store.example.com/wp-content/uploads/photo-1.webp' }],
           meta_data: [
             { key: WOOCOMMERCE_META_PRODUCT_ID, value: 'prod-1' },

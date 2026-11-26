@@ -67,34 +67,53 @@ function extractWooErrorDetail(response: HttpResponse): { code: string; message:
   return { code: '', message: `WooCommerce HTTP ${response.status}` };
 }
 
+export class WooCommerceApiError extends ChannelError {
+  constructor(
+    code: ChannelErrorCode,
+    message: string,
+    readonly httpStatus: number,
+    readonly wooCode: string,
+    requirement?: PublishRequirement,
+  ) {
+    super(ChannelType.WooCommerce, code, message, requirement);
+  }
+}
+
 function toChannelError(response: HttpResponse): ChannelError {
   const detail = extractWooErrorDetail(response);
   if (response.status === HTTP_UNAUTHORIZED || response.status === HTTP_FORBIDDEN) {
-    return wooCommerceError(
+    return new WooCommerceApiError(
       ChannelErrorCode.CredentialsRejected,
       `WooCommerce rechazó las credenciales o permisos (${detail.message})`,
+      response.status,
+      detail.code,
     );
   }
   if (response.status === HTTP_RATE_LIMITED) {
-    return wooCommerceError(
+    return new WooCommerceApiError(
       ChannelErrorCode.RateLimited,
       `WooCommerce limitó temporalmente las solicitudes (${detail.message})`,
+      response.status,
+      detail.code,
     );
   }
   if (response.status >= HTTP_SERVER_ERROR_MIN) {
-    return wooCommerceError(
+    return new WooCommerceApiError(
       ChannelErrorCode.ChannelUnavailable,
       `La tienda WooCommerce no está disponible temporalmente (${detail.message})`,
+      response.status,
+      detail.code,
     );
   }
   const requirement =
     detail.code === 'woocommerce_product_image_upload_error'
       ? PublishRequirement.Images
       : undefined;
-  return new ChannelError(
-    ChannelType.WooCommerce,
+  return new WooCommerceApiError(
     ChannelErrorCode.RequestRejected,
     detail.message,
+    response.status,
+    detail.code,
     requirement,
   );
 }

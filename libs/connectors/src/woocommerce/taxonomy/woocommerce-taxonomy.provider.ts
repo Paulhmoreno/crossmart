@@ -7,14 +7,21 @@ import {
   type ChannelCategory,
   type TaxonomyProvider,
 } from '../../sdk/capabilities/taxonomy-provider.js';
+import { ChannelErrorCode } from '../../sdk/errors/channel-error-code.enum.js';
 import { HttpMethod } from '../../sdk/http/http-method.enum.js';
 import { type WooCommerceAccount, wooCommerceAccount } from '../account/woocommerce-credentials.js';
-import { WooCommerceApiClient } from '../api/woocommerce-api.client.js';
-import type { WooAttribute, WooAttributeTerm, WooCategory } from '../api/woocommerce-api.types.js';
+import { WooCommerceApiClient, WooCommerceApiError } from '../api/woocommerce-api.client.js';
+import type {
+  WooAttribute,
+  WooAttributeTerm,
+  WooCategory,
+  WooTerm,
+} from '../api/woocommerce-api.types.js';
 import {
   WOOCOMMERCE_MAX_TAXONOMY_PAGES,
   WOOCOMMERCE_TAXONOMY_PAGE_SIZE,
 } from '../woocommerce.constants.js';
+import { wooCommerceError } from '../woocommerce-errors.js';
 
 const MAX_SUGGESTIONS = 25;
 const MAX_TERMS_PER_ATTRIBUTE = 50;
@@ -23,8 +30,17 @@ const SCORE_EXACT = 100;
 const SCORE_NAME_MATCH = 75;
 const SCORE_PATH_MATCH = 50;
 const SCORE_TOKEN_MAX = 40;
+const HTTP_NOT_FOUND = 404;
 
-function decodeHtmlEntities(value: string): string {
+const TERM_EXISTS_CODES = new Set([
+  'term_exists',
+  'woocommerce_rest_term_exists',
+  'rest_term_exists',
+]);
+
+export type WooTermResource = 'categories' | 'brands' | 'tags';
+
+export function decodeHtmlEntities(value: string): string {
   return value
     .replace(/&amp;/g, '&')
     .replace(/&lt;/g, '<')
@@ -37,12 +53,34 @@ function decodeHtmlEntities(value: string): string {
     });
 }
 
-function normalizeText(value: string): string {
+export function normalizeWooText(value: string): string {
   return decodeHtmlEntities(value)
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
     .toLowerCase()
     .trim();
+}
+
+export function normalizeExactTermName(value: string): string {
+  return decodeHtmlEntities(value).normalize('NFKC').toLowerCase().trim();
+}
+
+export function toWooSlug(value: string): string {
+  return (
+    decodeHtmlEntities(value)
+      .normalize('NFKD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '') || 'term'
+  );
+}
+
+export function parseCategorySegments(categoryText: string): string[] {
+  return categoryText
+    .split(/\s*(?:>|\/)\s*/)
+    .map((segment) => decodeHtmlEntities(segment).trim())
+    .filter((segment) => segment.length > 0);
 }
 
 function buildCategoryPath(category: WooCategory, byId: Map<number, WooCategory>): string {
@@ -58,10 +96,10 @@ function buildCategoryPath(category: WooCategory, byId: Map<number, WooCategory>
 }
 
 function scoreCategoryMatch(path: string, name: string, query: string): number {
-  const normalizedQuery = normalizeText(query);
+  const normalizedQuery = normalizeWooText(query);
   if (!normalizedQuery) return 1;
-  const normalizedName = normalizeText(name);
-  const normalizedPath = normalizeText(path);
+  const normalizedName = normalizeWooText(name);
+  const normalizedPath = normalizeWooText(path);
   if (normalizedName === normalizedQuery || normalizedPath === normalizedQuery) return SCORE_EXACT;
   if (normalizedName.includes(normalizedQuery)) return SCORE_NAME_MATCH;
   if (normalizedPath.includes(normalizedQuery)) return SCORE_PATH_MATCH;
@@ -72,8 +110,8 @@ function scoreCategoryMatch(path: string, name: string, query: string): number {
 }
 
 /**
- * Reads WooCommerce store categories and global attributes for Crossmart's native listing
- * category picker and item specifics editor.
+ * Reads and resolves WooCommerce store categories, brands, tags, and global attributes
+ * for Crossmart's native taxonomy picker and listing publisher.
  */
 @Injectable()
 export class WooCommerceTaxonomyProvider implements TaxonomyProvider {
@@ -103,12 +141,7 @@ export class WooCommerceTaxonomyProvider implements TaxonomyProvider {
 
   async categoryAspects(session: ChannelSession, _categoryId: string): Promise<CategoryAspect[]> {
     const { account } = await wooCommerceAccount(session);
-    const attributesRes = await this.api.request<WooAttribute[]>(
-      account,
-      HttpMethod.Get,
-      '/products/attributes',
-    );
-    const attributes = Array.isArray(attributesRes.data) ? attributesRes.data : [];
+    const attributes = await this.listGlobalAttributes(account);
 
     const aspects: CategoryAspect[] = [
       {
@@ -138,6 +171,47 @@ export class WooCommerceTaxonomyProvider implements TaxonomyProvider {
     return aspects;
   }
 
+  async listGlobalAttributes(account: WooCommerceAccount): Promise<WooAttribute[]> {
+    const attributesRes = await this.api.request<WooAttribute[]>(
+      account,
+      HttpMethod.Get,
+      '/products/attributes',
+    );
+    return Array.isArray(attributesRes.data) ? attributesRes.data : [];
+  }
+
+  async ensureAttributeTerms(
+    account: WooCommerceAccount,
+    attributeId: number,
+    optionValues: readonly string[],
+  ): Promise<void> {
+    const existing = await this.listAttributeTerms(account, attributeId);
+    const existingNames = new Set(existing.map((term) => normalizeExactTermName(term.name)));
+    const existingSlugs = new Set(existing.map((term) => term.slug.toLowerCase()));
+
+    for (const raw of optionValues) {
+      const name = raw.trim();
+      if (!name) continue;
+      const slug = toWooSlug(name);
+      if (existingNames.has(normalizeExactTermName(name)) || existingSlugs.has(slug)) continue;
+      try {
+        await this.api.request<WooAttributeTerm>(
+          account,
+          HttpMethod.Post,
+          `/products/attributes/${attributeId}/terms`,
+          { name, slug },
+        );
+        existingNames.add(normalizeExactTermName(name));
+        existingSlugs.add(slug);
+      } catch (error) {
+        if (error instanceof WooCommerceApiError && TERM_EXISTS_CODES.has(error.wooCode)) {
+          continue;
+        }
+        throw error;
+      }
+    }
+  }
+
   async listCategories(account: WooCommerceAccount): Promise<WooCategory[]> {
     const all: WooCategory[] = [];
     for (let page = FIRST_PAGE; page <= WOOCOMMERCE_MAX_TAXONOMY_PAGES; page += 1) {
@@ -153,28 +227,126 @@ export class WooCommerceTaxonomyProvider implements TaxonomyProvider {
     return all;
   }
 
-  /** Finds an existing WooCommerce category matching an Odoo/Crossmart category path reliably. */
-  async findReliableCategoryMatch(
+  /**
+   * Resolves a hierarchical category path (e.g. "Computación / Teclados y Mouse / Mouse") level by
+   * level under its exact parent, reusing existing terms and creating only missing levels.
+   * Uses path-scoped deterministic slugs so homonymous categories under different parents never
+   * collide.
+   */
+  async resolveCategoryHierarchy(
     account: WooCommerceAccount,
     categoryText: string | null | undefined,
   ): Promise<ChannelCategory | null> {
     if (!categoryText?.trim()) return null;
-    const categories = await this.listCategories(account);
-    const byId = new Map(categories.map((cat) => [cat.id, cat]));
-    const normalizedSegments = categoryText
-      .split(/[>/]/)
-      .map((part) => normalizeText(part))
-      .filter(Boolean);
-    const leaf = normalizedSegments[normalizedSegments.length - 1];
-    if (!leaf) return null;
+    const segments = parseCategorySegments(categoryText);
+    if (segments.length === 0) return null;
 
-    const exact = categories.find((cat) => {
-      const normalizedPath = normalizeText(buildCategoryPath(cat, byId));
-      const normalizedFull = normalizedSegments.join(' > ');
-      return normalizedPath === normalizedFull || normalizeText(cat.name) === leaf;
-    });
-    if (!exact) return null;
-    return { id: String(exact.id), name: buildCategoryPath(exact, byId) };
+    let parentId = 0;
+    const walked: string[] = [];
+    for (const segment of segments) {
+      walked.push(segment);
+      const slug = toWooSlug(walked.join('-'));
+      const term = await this.resolveTerm(account, 'categories', segment, slug, parentId);
+      parentId = term.id;
+    }
+
+    return { id: String(parentId), name: walked.join(' > ') };
+  }
+
+  /**
+   * Resolves a brand in WooCommerce's native `/products/brands` taxonomy, creating it only when
+   * absent. Reports honestly when the store does not support the native brands REST API.
+   */
+  async resolveBrand(account: WooCommerceAccount, brandName: string): Promise<WooTerm> {
+    const trimmed = brandName.trim();
+    try {
+      return await this.resolveTerm(account, 'brands', trimmed, toWooSlug(trimmed));
+    } catch (error) {
+      if (
+        error instanceof WooCommerceApiError &&
+        (error.httpStatus === HTTP_NOT_FOUND || error.wooCode === 'rest_no_route')
+      ) {
+        throw wooCommerceError(
+          ChannelErrorCode.RequestRejected,
+          'La instalación de WooCommerce no soporta la API nativa de marcas (/products/brands). Habilita la taxonomía nativa de marcas en WooCommerce para asignar marcas.',
+        );
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Resolves an existing WooCommerce taxonomy term (`categories`, `brands`, or `tags`) by
+   * deterministic slug or paginated exact case-insensitive name (scoped to `parent` for
+   * hierarchical categories), creating it only if absent and recovering safely from `term_exists`
+   * races. Non-duplicate API errors are always propagated.
+   */
+  async resolveTerm(
+    account: WooCommerceAccount,
+    resource: WooTermResource,
+    rawName: string,
+    slug: string,
+    parent?: number,
+  ): Promise<WooTerm> {
+    const name = rawName.trim();
+    const endpoint = `/products/${resource}`;
+    const expectedParent = resource === 'categories' ? (parent ?? 0) : undefined;
+    const matchesParent = (term: WooTerm): boolean =>
+      resource !== 'categories' || (term.parent ?? 0) === expectedParent;
+    const targetName = normalizeExactTermName(name);
+
+    const lookup = async (): Promise<WooTerm | null> => {
+      const bySlugRes = await this.api.request<WooTerm[]>(
+        account,
+        HttpMethod.Get,
+        `${endpoint}?slug=${encodeURIComponent(slug)}`,
+      );
+      const bySlugRows = Array.isArray(bySlugRes.data) ? bySlugRes.data : [];
+      const slugMatch = bySlugRows.find(matchesParent);
+      if (slugMatch) return slugMatch;
+
+      const parentQuery = resource === 'categories' ? `&parent=${expectedParent}` : '';
+      for (let page = FIRST_PAGE; page <= WOOCOMMERCE_MAX_TAXONOMY_PAGES; page += 1) {
+        const searchRes = await this.api.request<WooTerm[]>(
+          account,
+          HttpMethod.Get,
+          `${endpoint}?search=${encodeURIComponent(name)}&per_page=${WOOCOMMERCE_TAXONOMY_PAGE_SIZE}&page=${page}${parentQuery}`,
+        );
+        const rows = Array.isArray(searchRes.data) ? searchRes.data : [];
+        const exact = rows.find(
+          (term) => matchesParent(term) && normalizeExactTermName(term.name) === targetName,
+        );
+        if (exact) return exact;
+        if (rows.length < WOOCOMMERCE_TAXONOMY_PAGE_SIZE) return null;
+      }
+      return null;
+    };
+
+    const existing = await lookup();
+    if (existing) return existing;
+
+    try {
+      const created = (
+        await this.api.request<WooTerm>(account, HttpMethod.Post, endpoint, {
+          name,
+          slug,
+          ...(resource === 'categories' ? { parent: expectedParent } : {}),
+        })
+      ).data;
+      if (!created || !Number.isInteger(created.id) || created.id <= 0) {
+        throw wooCommerceError(
+          ChannelErrorCode.RequestRejected,
+          `WooCommerce devolvió un ID inválido al crear "${name}" en ${resource}.`,
+        );
+      }
+      return created;
+    } catch (error) {
+      if (error instanceof WooCommerceApiError && TERM_EXISTS_CODES.has(error.wooCode)) {
+        const winner = await lookup();
+        if (winner) return winner;
+      }
+      throw error;
+    }
   }
 
   private async listAttributeTerms(

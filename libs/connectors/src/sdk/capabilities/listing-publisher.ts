@@ -49,6 +49,12 @@ export interface ListingDraft {
    * map it to their own; without it they use the connection's default (eBay) or `new`.
    */
   condition?: ItemCondition | null;
+  /**
+   * Explicit per-listing visibility override chosen by the operator (`visible` or `hidden`).
+   * Absent/null means no explicit channel override was set (connectors must not auto-promote
+   * drafts when absent).
+   */
+  explicitVisibility?: 'visible' | 'hidden' | null;
 }
 
 /** The ids the channel gave a published listing, to store as `Listing` / `ListingVariant`. */

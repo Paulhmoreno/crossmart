@@ -17,10 +17,23 @@ export interface WooCategoryRef {
   slug?: string;
 }
 
+export interface WooBrandRef {
+  id: number;
+  name?: string;
+  slug?: string;
+}
+
 export interface WooTagRef {
   id: number;
   name?: string;
   slug?: string;
+}
+
+export interface WooTerm {
+  id: number;
+  name: string;
+  slug: string;
+  parent?: number;
 }
 
 export interface WooProductAttribute {
@@ -67,6 +80,7 @@ export interface WooProduct {
   dimensions?: WooDimensions;
   shipping_required?: boolean;
   categories?: WooCategoryRef[];
+  brands?: WooBrandRef[];
   tags?: WooTagRef[];
   images?: WooImage[];
   attributes?: WooProductAttribute[];

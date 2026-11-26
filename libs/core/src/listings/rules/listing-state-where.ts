@@ -33,11 +33,25 @@ function both(...conditions: Prisma.ProductWhereInput[]): Prisma.ProductWhereInp
   return { AND: conditions };
 }
 
+/** Products with an ACTIVE (live) listing on the store. */
+function activeOnChannel(connectionId: string): Prisma.ProductWhereInput {
+  return { listings: { some: { connectionId, status: ListingStatus.ACTIVE } } };
+}
+
+/** Products held on the store only as INACTIVE (e.g. WooCommerce draft), with no ACTIVE listing. */
+function inactiveOnlyOnChannel(connectionId: string): Prisma.ProductWhereInput {
+  return both(
+    { listings: { some: { connectionId, status: ListingStatus.INACTIVE } } },
+    { NOT: activeOnChannel(connectionId) },
+  );
+}
+
 /**
  * The products of each display state that SQL decides alone, by the same rule as
- * `listingDisplayOf`: listed products are published, or publishing while a sync updates them;
- * unselected ones are removing, removed, a draft, or failed. Each state sums its conditions.
- * Selected products off the channel, and selected failures, are left to `unsettledWhere`.
+ * `listingDisplayOf`: listed ACTIVE products are published, listed INACTIVE products are drafts,
+ * sync-queued ones are publishing; unselected ones are removing, removed, a draft, or failed.
+ * Each state sums its conditions. Selected products off the channel, and selected failures, are
+ * left to `unsettledWhere`.
  */
 export function settledStateConditions(scope: ChannelProductScope): SettledStateConditions {
   const state = (value: ChannelProductState): Prisma.ProductWhereInput =>
@@ -45,12 +59,16 @@ export function settledStateConditions(scope: ChannelProductScope): SettledState
   const { connectionId } = scope;
   const listed = state(ChannelProductState.Listed);
   const excluded = state(ChannelProductState.Excluded);
+  const notQueued = { NOT: syncQueuedOnChannel(connectionId) };
   return {
-    [ListingDisplayState.Draft]: [both(excluded, { NOT: delistedFrom(connectionId) })],
+    [ListingDisplayState.Draft]: [
+      both(excluded, { NOT: delistedFrom(connectionId) }),
+      both(listed, notQueued, inactiveOnlyOnChannel(connectionId)),
+    ],
     [ListingDisplayState.NeedsDetails]: [],
     [ListingDisplayState.Ready]: [],
     [ListingDisplayState.Publishing]: [both(listed, syncQueuedOnChannel(connectionId))],
-    [ListingDisplayState.Published]: [both(listed, { NOT: syncQueuedOnChannel(connectionId) })],
+    [ListingDisplayState.Published]: [both(listed, notQueued, activeOnChannel(connectionId))],
     [ListingDisplayState.Failed]: [
       both(state(ChannelProductState.Failed), { NOT: selectionWhere(scope) }),
     ],

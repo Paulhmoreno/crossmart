@@ -7,7 +7,7 @@ import type {
   PriceUpdate,
 } from '@crossmart/connectors';
 import { sanitizeDescriptionHtml } from '@crossmart/common';
-import { OutOfStockPolicy } from '@crossmart/database';
+import { ListingVisibility, OutOfStockPolicy } from '@crossmart/database';
 import type { ProductDetail, VariantView } from '../../catalog/entities/product-views.js';
 import type {
   PricingContext,
@@ -79,6 +79,12 @@ export class ListingDraftBuilder {
         category: listingCategory(listing),
         itemSpecifics: listingItemSpecifics(listing),
         condition: toItemCondition(product.condition),
+        explicitVisibility:
+          listing?.override?.visibility === ListingVisibility.VISIBLE
+            ? 'visible'
+            : listing?.override?.visibility === ListingVisibility.HIDDEN
+              ? 'hidden'
+              : null,
       },
       mediaDigest: digest,
     };

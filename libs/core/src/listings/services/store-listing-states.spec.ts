@@ -66,7 +66,7 @@ describe('StoreListingStates', () => {
 
     expect(products.listDisplayCandidateBatch).not.toHaveBeenCalled();
     expect(counts).toEqual({
-      [ListingDisplayState.Draft]: 2,
+      [ListingDisplayState.Draft]: 4,
       [ListingDisplayState.NeedsDetails]: 2,
       [ListingDisplayState.Ready]: 0,
       [ListingDisplayState.Publishing]: 2,

@@ -114,11 +114,21 @@ describe('listingDisplayOf', () => {
   });
 
   describe('a selected product the channel holds', () => {
-    it.each([ListingStatus.ACTIVE, ListingStatus.INACTIVE])('is published (%s)', (status) => {
-      const held = input({ listing: listing(status), blockers: [NO_POLICY] });
+    it('is published when ACTIVE', () => {
+      const held = input({ listing: listing(ListingStatus.ACTIVE), blockers: [NO_POLICY] });
 
       expect(listingDisplayOf(held)).toEqual({
         state: ListingDisplayState.Published,
+        reason: null,
+        requirement: null,
+      });
+    });
+
+    it('is draft when INACTIVE (e.g. WooCommerce draft)', () => {
+      const held = input({ listing: listing(ListingStatus.INACTIVE), blockers: [NO_POLICY] });
+
+      expect(listingDisplayOf(held)).toEqual({
+        state: ListingDisplayState.Draft,
         reason: null,
         requirement: null,
       });
