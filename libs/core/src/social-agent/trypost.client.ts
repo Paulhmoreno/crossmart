@@ -100,20 +100,34 @@ export class TryPostClient {
 
   async testConnection(auth: TryPostAuth): Promise<TryPostTestResult> {
     try {
-      const channelsRaw = await this.request<unknown>(auth, 'GET', '/channels');
+      const channelsRaw = await this.fetchFirstAvailable<unknown>(auth, [
+        '/social-accounts',
+        '/accounts',
+        '/channels',
+      ]);
       const channels: TryPostChannel[] = asArray(channelsRaw).map((ch) => ({
         id: str(ch.id),
-        name: str(ch.name ?? ch.title ?? ch.username, 'Account'),
-        platform: str(ch.platform ?? ch.provider ?? ch.type, 'social'),
-        username: typeof ch.username === 'string' ? ch.username : null,
-        avatarUrl: typeof ch.avatar_url === 'string' ? ch.avatar_url : null,
+        name: str(ch.name ?? ch.display_name ?? ch.title ?? ch.username, 'Account'),
+        platform: str(ch.platform ?? ch.provider ?? ch.network ?? ch.type, 'social'),
+        username:
+          typeof ch.username === 'string'
+            ? ch.username
+            : typeof ch.handle === 'string'
+              ? ch.handle
+              : null,
+        avatarUrl:
+          typeof ch.avatar_url === 'string'
+            ? ch.avatar_url
+            : typeof ch.avatar === 'string'
+              ? ch.avatar
+              : null,
         status: str(ch.status, 'connected'),
       }));
 
       // Probe optional endpoints safely (read-only) to report real capabilities
       const [ideasOk, analyticsOk, webhooksOk] = await Promise.all([
         this.probeReadEndpoint(auth, '/ideas'),
-        this.probeReadEndpoint(auth, '/analytics/workspace'),
+        this.probeAnyReadEndpoint(auth, ['/analytics', '/analytics/workspace']),
         this.probeReadEndpoint(auth, '/webhooks'),
       ]);
 
@@ -203,15 +217,45 @@ export class TryPostClient {
   }
 
   async getQueueSlots(auth: TryPostAuth, channelId: string): Promise<Array<Record<string, unknown>>> {
-    return asArray(await this.request<unknown>(auth, 'GET', `/channels/${channelId}/queue/slots`));
+    return asArray(
+      await this.fetchFirstAvailable<unknown>(auth, [
+        `/social-accounts/${channelId}/queue/slots`,
+        `/channels/${channelId}/queue/slots`,
+      ]),
+    );
   }
 
   async getWorkspaceAnalytics(auth: TryPostAuth): Promise<Record<string, unknown> | null> {
     try {
-      return await this.request<Record<string, unknown>>(auth, 'GET', '/analytics/workspace');
+      return await this.fetchFirstAvailable<Record<string, unknown>>(auth, [
+        '/analytics',
+        '/analytics/workspace',
+      ]);
     } catch {
       return null;
     }
+  }
+
+  private async fetchFirstAvailable<T>(auth: TryPostAuth, paths: string[]): Promise<T> {
+    let lastError: unknown;
+    for (const path of paths) {
+      try {
+        return await this.request<T>(auth, 'GET', path);
+      } catch (error) {
+        lastError = error;
+        const msg = error instanceof Error ? error.message : String(error);
+        // Only fall back on 404 route-not-found; fail fast on 401/403/5xx/network errors
+        if (!msg.includes('(404)')) throw error;
+      }
+    }
+    throw lastError instanceof Error ? lastError : new Error('TryPost endpoint not found');
+  }
+
+  private async probeAnyReadEndpoint(auth: TryPostAuth, paths: string[]): Promise<boolean> {
+    for (const path of paths) {
+      if (await this.probeReadEndpoint(auth, path)) return true;
+    }
+    return false;
   }
 
   private async probeReadEndpoint(auth: TryPostAuth, path: string): Promise<boolean> {
