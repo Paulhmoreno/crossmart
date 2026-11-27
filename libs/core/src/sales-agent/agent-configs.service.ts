@@ -11,7 +11,7 @@ import { ActivityAction } from '../activity/enums/activity-action.enum.js';
 import { ActivitySubjectType } from '../activity/enums/activity-subject-type.enum.js';
 import { ActivityRecorder } from '../activity/services/activity-recorder.js';
 
-export const INTERNAL_AGENT_KEYS = ['crossmart', 'sales'] as const;
+export const INTERNAL_AGENT_KEYS = ['crossmart', 'sales', 'social'] as const;
 export type InternalAgentKey = (typeof INTERNAL_AGENT_KEYS)[number];
 
 export interface SalesCommercialPolicy {
@@ -45,7 +45,7 @@ export interface UpdateAgentConfigInput {
 }
 
 function isInternalAgentKey(key: string): key is InternalAgentKey {
-  return key === 'crossmart' || key === 'sales';
+  return key === 'crossmart' || key === 'sales' || key === 'social';
 }
 
 function parseInboxIds(raw: Prisma.JsonValue | null | undefined): number[] {

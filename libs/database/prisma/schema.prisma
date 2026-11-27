@@ -2285,3 +2285,126 @@ model SalesEvent {
   @@index([workspaceId, createdAt(sort: Desc)])
   @@map("sales_events")
 }
+
+// ─── Social Marketing Agent & TryPost Connector ───────────────────────────────
+
+/// Workspace connection to TryPost (Cloud or self-hosted) via encrypted REST API key.
+model TryPostConnection {
+  id                  String    @id @default(uuid(7)) @db.Uuid
+  workspaceId         String    @unique @map("workspace_id") @db.Uuid
+  displayName         String    @default("TryPost") @map("display_name")
+  baseUrl             String    @default("https://app.trypost.it/api") @map("base_url")
+  isSelfHosted        Boolean   @default(false) @map("is_self_hosted")
+  /// AES-GCM sealed JSON `{ apiKey }`, null when disconnected/revoked.
+  sealedCredentials   String?   @map("sealed_credentials")
+  secretMasked        String?   @map("secret_masked")
+  /// `CONNECTED` | `ERROR` | `DISCONNECTED`
+  status              String    @default("DISCONNECTED")
+  statusReason        String?   @map("status_reason")
+  remoteWorkspaceName String?   @map("remote_workspace_name")
+  /// Discovered social channels/accounts from TryPost `/channels`.
+  channels            Json      @default("[]")
+  /// Verified REST capabilities map.
+  capabilities        Json      @default("{}")
+  webhookEndpointId   String?   @map("webhook_endpoint_id")
+  lastTestedAt        DateTime? @map("last_tested_at")
+  lastSyncedAt        DateTime? @map("last_synced_at")
+  createdAt           DateTime  @default(now()) @map("created_at")
+  updatedAt           DateTime  @updatedAt @map("updated_at")
+
+  @@map("trypost_connections")
+}
+
+/// Optional dynamic creative profiles & assets configurable per workspace (100% universal, zero hardcoded brand data).
+model CreativeProfile {
+  id           String   @id @default(uuid(7)) @db.Uuid
+  workspaceId  String   @map("workspace_id") @db.Uuid
+  name         String
+  objective    String?
+  instructions String   @default("")
+  references   Json     @default("[]")
+  assets       Json     @default("[]")
+  restrictions Json     @default("[]")
+  preferences  Json     @default("{}")
+  version      Int      @default(1)
+  /// `ACTIVE` | `DRAFT` | `ARCHIVED`
+  status       String   @default("ACTIVE")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  @@index([workspaceId, status])
+  @@map("creative_profiles")
+}
+
+/// Editorial ideas, drafts, visual compositions, audiovisual scripts/storyboards, and TryPost-linked items.
+model SocialContentItem {
+  id                 String    @id @default(uuid(7)) @db.Uuid
+  workspaceId        String    @map("workspace_id") @db.Uuid
+  /// `IDEA` | `POST` | `CAROUSEL` | `VIDEO_SCRIPT` | `CAMPAIGN`
+  kind               String    @default("POST")
+  title              String
+  objective          String?
+  pillar             String?
+  caption            String    @default("")
+  channelAdaptations Json      @default("{}") @map("channel_adaptations")
+  productIds         Json      @default("[]") @map("product_ids")
+  creativeProfileId  String?   @map("creative_profile_id") @db.Uuid
+  /// `ASSISTED` | `COMPOSITION` | `AI_VISUAL` | `AUDIOVISUAL`
+  productionMode     String    @default("ASSISTED") @map("production_mode")
+  /// Storyboard, scenes, prompts, visual composition SVG/layout, internal notes.
+  productionSpec     Json      @default("{}") @map("production_spec")
+  mediaAssets        Json      @default("[]") @map("media_assets")
+  /// `IDEA` | `IN_PRODUCTION` | `PENDING_APPROVAL` | `APPROVED` | `DRAFT_REMOTE` | `SCHEDULED` | `PUBLISHED` | `REJECTED` | `ARCHIVED`
+  status             String    @default("IDEA")
+  contentVersion     Int       @default(1) @map("content_version")
+  approvedVersion    Int?      @map("approved_version")
+  approvedAt         DateTime? @map("approved_at")
+  approvedById       String?   @map("approved_by_id") @db.Uuid
+  trypostIdeaId      String?   @map("trypost_idea_id")
+  trypostPostId      String?   @map("trypost_post_id")
+  targetChannelIds   Json      @default("[]") @map("target_channel_ids")
+  scheduledFor       DateTime? @map("scheduled_for")
+  estimatedCostUsd   Decimal?  @map("estimated_cost_usd") @db.Decimal(10, 4)
+  actualCostUsd      Decimal?  @map("actual_cost_usd") @db.Decimal(10, 4)
+  qualityChecks      Json      @default("{}") @map("quality_checks")
+  metrics            Json      @default("{}")
+  createdAt          DateTime  @default(now()) @map("created_at")
+  updatedAt          DateTime  @updatedAt @map("updated_at")
+
+  @@index([workspaceId, status, updatedAt(sort: Desc)])
+  @@map("social_content_items")
+}
+
+/// Deterministic creative budget & autonomy policy per workspace (independent of paid ads).
+model SocialBudgetPolicy {
+  id                      String   @id @default(uuid(7)) @db.Uuid
+  workspaceId             String   @unique @map("workspace_id") @db.Uuid
+  /// `MANUAL` | `SUPERVISED` | `AUTOMATIC`
+  autonomyMode            String   @default("SUPERVISED") @map("autonomy_mode")
+  paused                  Boolean  @default(false)
+  autoPublishAuthorized   Boolean  @default(false) @map("auto_publish_authorized")
+  monthlyLimitUsd         Decimal  @default(0) @map("monthly_limit_usd") @db.Decimal(10, 2)
+  perTaskLimitUsd         Decimal  @default(0) @map("per_task_limit_usd") @db.Decimal(10, 2)
+  maxRegenerationsPerItem Int      @default(3) @map("max_regenerations_per_item")
+  spentThisMonthUsd       Decimal  @default(0) @map("spent_this_month_usd") @db.Decimal(10, 4)
+  authorizedChannelIds    Json     @default("[]") @map("authorized_channel_ids")
+  planningFrequency       String   @default("WEEKLY") @map("planning_frequency")
+  timezone                String   @default("America/Guayaquil")
+  updatedAt               DateTime @updatedAt @map("updated_at")
+
+  @@map("social_budget_policies")
+}
+
+/// Real operational & creative events for the Social Agent console (no fabricated entries).
+model SocialAgentEvent {
+  id          String   @id @default(uuid(7)) @db.Uuid
+  workspaceId String   @map("workspace_id") @db.Uuid
+  eventType   String   @map("event_type")
+  summary     String
+  severity    String   @default("info")
+  metadata    Json     @default("{}")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@index([workspaceId, createdAt(sort: Desc)])
+  @@map("social_agent_events")
+}
