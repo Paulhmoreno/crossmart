@@ -11,15 +11,17 @@ import {
   SalesLearningStatus,
 } from '@crossmart/database';
 import type {
-  AiContentBlock,
   AiConversationMessage,
   AiToolDefinition,
-  AiToolUseBlock,
 } from '../ai/entities/ai-conversation.js';
 import { AiContentBlockType } from '../ai/enums/ai-content-block-type.enum.js';
 import { AiConversationRole } from '../ai/enums/ai-conversation-role.enum.js';
 import { AiFeature } from '../ai/enums/ai-feature.enum.js';
-import { AiGateway } from '../ai/services/ai-gateway.service.js';
+import {
+  AgentExecutionEngine,
+  type AgentStreamSink,
+  type ExecutableAgentTool,
+} from '../ai/services/agent-execution-engine.service.js';
 import { ChatwootClient } from '../chatwoot/chatwoot.client.js';
 import { ChatwootConnectionsService } from '../chatwoot/chatwoot-connections.service.js';
 import { AgentConfigsService, type SalesCommercialPolicy } from './agent-configs.service.js';
@@ -145,17 +147,6 @@ export interface SalesOperationalOverview {
     salesMode: SalesAgentMode;
   };
   events: SalesEventView[];
-}
-
-function isToolUse(block: AiContentBlock): block is AiToolUseBlock {
-  return block.type === AiContentBlockType.ToolUse;
-}
-
-function extractText(blocks: readonly AiContentBlock[]): string {
-  return blocks
-    .flatMap((block) => (block.type === AiContentBlockType.Text ? [block.text] : []))
-    .join('')
-    .trim();
 }
 
 function pickString(
@@ -346,7 +337,7 @@ export class SalesAgentService {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly ai: AiGateway,
+    private readonly engine: AgentExecutionEngine,
     private readonly configs: AgentConfigsService,
     private readonly tools: SalesAgentToolsService,
     private readonly knowledge: SalesKnowledgeService,
@@ -430,26 +421,32 @@ export class SalesAgentService {
     });
   }
 
+  cancelTurn(turnId: string): boolean {
+    return this.engine.cancelTurn(turnId);
+  }
+
   async sendMessage(
     workspaceId: string,
     conversationId: string,
     text: string,
     overrideContext?: SalesChannelContext,
+    options?: { locale?: string; sink?: AgentStreamSink; externalSignal?: AbortSignal },
   ): Promise<SalesConversationDetail> {
     const conv = await this.prisma.salesConversation.findFirst({
       where: { id: conversationId, workspaceId },
     });
     if (!conv) throw new NotFoundException('Sales conversation not found.');
     if (conv.source === 'supervisor') {
-      return this.sendSupervisorMessage(workspaceId, conv, text);
+      return this.sendSupervisorMessage(workspaceId, conv, text, options);
     }
-    return this.sendSimulatedBuyerMessage(workspaceId, conv, text, overrideContext);
+    return this.sendSimulatedBuyerMessage(workspaceId, conv, text, overrideContext, options);
   }
 
   private async sendSupervisorMessage(
     workspaceId: string,
     conv: { id: string; title: string },
     text: string,
+    options?: { locale?: string; sink?: AgentStreamSink; externalSignal?: AbortSignal },
   ): Promise<SalesConversationDetail> {
     const trimmed = text.trim();
     await this.prisma.salesMessage.create({
@@ -465,19 +462,22 @@ export class SalesAgentService {
       history,
       config.commercialPolicy,
       approvedKnowledge,
+      options,
     );
 
-    await this.prisma.salesMessage.create({
-      data: {
-        conversationId: conv.id,
-        role: 'assistant',
-        text: reply.text,
-        metadata: {
-          toolsUsed: reply.toolsUsed,
-          proposedLearningIds: reply.proposedLearningIds,
-        } as unknown as Prisma.InputJsonValue,
-      },
-    });
+    if (reply.text) {
+      await this.prisma.salesMessage.create({
+        data: {
+          conversationId: conv.id,
+          role: 'assistant',
+          text: reply.text,
+          metadata: {
+            toolsUsed: reply.toolsUsed,
+            proposedLearningIds: reply.proposedLearningIds,
+          } as unknown as Prisma.InputJsonValue,
+        },
+      });
+    }
 
     await this.prisma.salesConversation.update({
       where: { id: conv.id },
@@ -497,6 +497,7 @@ export class SalesAgentService {
     conv: { id: string; title: string; context: Prisma.JsonValue; channelType: string | null },
     buyerText: string,
     overrideContext?: SalesChannelContext,
+    options?: { locale?: string; sink?: AgentStreamSink; externalSignal?: AbortSignal },
   ): Promise<SalesConversationDetail> {
     const trimmed = buyerText.trim();
     const mergedContext: SalesChannelContext = {
@@ -519,20 +520,23 @@ export class SalesAgentService {
       history,
       config.commercialPolicy,
       mergedContext,
+      options,
     );
 
-    await this.prisma.salesMessage.create({
-      data: {
-        conversationId: conv.id,
-        role: 'assistant',
-        text: reply.text,
-        metadata: {
-          toolsUsed: reply.toolsUsed,
-          handoffReason: reply.handoffReason,
-          identifiedProductId: reply.identifiedProductId,
-        } as unknown as Prisma.InputJsonValue,
-      },
-    });
+    if (reply.text) {
+      await this.prisma.salesMessage.create({
+        data: {
+          conversationId: conv.id,
+          role: 'assistant',
+          text: reply.text,
+          metadata: {
+            toolsUsed: reply.toolsUsed,
+            handoffReason: reply.handoffReason,
+            identifiedProductId: reply.identifiedProductId,
+          } as unknown as Prisma.InputJsonValue,
+        },
+      });
+    }
 
     await this.prisma.salesConversation.update({
       where: { id: conv.id },
@@ -1041,6 +1045,7 @@ export class SalesAgentService {
     history: AiConversationMessage[],
     policy: SalesCommercialPolicy,
     context: SalesChannelContext,
+    options?: { locale?: string; sink?: AgentStreamSink; externalSignal?: AbortSignal },
   ): Promise<{
     text: string;
     toolsUsed: string[];
@@ -1075,57 +1080,63 @@ export class SalesAgentService {
     }
 
     const system = buildBuyerSystemPrompt(policy, approvedKnowledge, context, identifiedProduct);
-    const messages: AiConversationMessage[] = [...history];
-    const toolsUsed: string[] = [];
     let handoffReason: string | null = null;
-    let lastText = '';
 
-    for (let step = 0; step < MAX_TOOL_STEPS; step += 1) {
-      const turn = await this.ai.converse(
-        { workspaceId, feature: AiFeature.SalesAgent, agentKey: 'sales' },
-        {
-          system,
-          messages,
-          tools: this.tools.definitions(),
-          maxOutputTokens: MAX_OUTPUT_TOKENS,
-        },
-        { onTextDelta: () => undefined },
-      );
-      lastText = extractText(turn.content);
-      const calls = turn.content.filter(isToolUse);
-      if (calls.length === 0) break;
+    const toolTitles: Record<string, string> = {
+      search_catalog_products: 'Search catalog products',
+      get_product_commercial_details: 'Inspect product commercial details',
+      handoff_to_human: 'Transfer conversation to human specialist',
+    };
 
-      messages.push({ role: AiConversationRole.Assistant, content: turn.content });
-      const resultBlocks: AiContentBlock[] = [];
-      for (const call of calls) {
-        toolsUsed.push(call.name);
-        const exec = await this.tools.execute(workspaceId, call.name, call.input, policy);
+    const executableTools: ExecutableAgentTool[] = this.tools.definitions().map((def) => ({
+      definition: def,
+      title: toolTitles[def.name] ?? def.name,
+      execute: async (input) => {
+        const exec = await this.tools.execute(workspaceId, def.name, input, policy);
         if (
-          call.name === 'search_catalog_products' ||
-          call.name === 'get_product_commercial_details'
+          def.name === 'search_catalog_products' ||
+          def.name === 'get_product_commercial_details'
         ) {
           await this.knowledge.recordEvent(workspaceId, {
             type: 'catalog_queried',
             channelType: context.channelType,
             conversationId,
-            summary: `Catalog queried (${call.name}): ${exec.matchedProductIds?.length ?? 0} match(es)`,
-            details: { tool: call.name, matches: exec.matchedProductIds?.length ?? 0 },
+            summary: `Catalog queried (${def.name}): ${exec.matchedProductIds?.length ?? 0} match(es)`,
+            details: { tool: def.name, matches: exec.matchedProductIds?.length ?? 0 },
           });
         }
         if (exec.handoff) handoffReason = exec.handoff.reason;
-        resultBlocks.push({
-          type: AiContentBlockType.ToolResult,
-          toolUseId: call.id,
-          content: JSON.stringify(exec.output),
-          isError: false,
-        });
-      }
-      messages.push({ role: AiConversationRole.User, content: resultBlocks });
-    }
+        return {
+          output: exec.output,
+          outcome:
+            typeof exec.matchedProductIds?.length === 'number'
+              ? `${exec.matchedProductIds.length} match(es)`
+              : undefined,
+        };
+      },
+    }));
+
+    const result = await this.engine.runTurn(
+      {
+        workspaceId,
+        agentKey: 'sales',
+        feature: AiFeature.SalesAgent,
+        conversationKey: `${workspaceId}:sales:${conversationId}`,
+        systemPrompt: system,
+        locale: options?.locale ?? 'es-EC',
+        messages: [...history],
+        tools: executableTools,
+        maxSteps: MAX_TOOL_STEPS,
+        maxOutputTokens: MAX_OUTPUT_TOKENS,
+        externalSignal: options?.externalSignal,
+        fallbackText: 'Un asesor de nuestro equipo te ayudará enseguida con esta consulta.',
+      },
+      options?.sink,
+    );
 
     return {
-      text: lastText || 'Un asesor de nuestro equipo te ayudará enseguida con esta consulta.',
-      toolsUsed,
+      text: result.text,
+      toolsUsed: result.toolsUsed,
       handoffReason,
       identifiedProductId: identifiedProduct?.productId ?? null,
     };
@@ -1198,93 +1209,117 @@ export class SalesAgentService {
     history: AiConversationMessage[],
     policy: SalesCommercialPolicy,
     approvedKnowledge: readonly SalesKnowledgeEntryView[],
+    options?: { locale?: string; sink?: AgentStreamSink; externalSignal?: AbortSignal },
   ): Promise<{ text: string; toolsUsed: string[]; proposedLearningIds: string[] }> {
     const system = buildSupervisorSystemPrompt(policy, approvedKnowledge);
-    const messages: AiConversationMessage[] = [...history];
-    const toolsUsed: string[] = [];
     const proposedLearningIds: string[] = [];
-    let lastText = '';
 
-    for (let step = 0; step < MAX_TOOL_STEPS; step += 1) {
-      const turn = await this.ai.converse(
-        { workspaceId, feature: AiFeature.SalesAgent, agentKey: 'sales' },
-        {
-          system,
-          messages,
-          tools: this.supervisorToolDefinitions(),
-          maxOutputTokens: MAX_OUTPUT_TOKENS,
-        },
-        { onTextDelta: () => undefined },
-      );
-      lastText = extractText(turn.content);
-      const calls = turn.content.filter(isToolUse);
-      if (calls.length === 0) break;
+    const defs = this.supervisorToolDefinitions();
+    const byName = new Map(defs.map((d) => [d.name, d]));
 
-      messages.push({ role: AiConversationRole.Assistant, content: turn.content });
-      const resultBlocks: AiContentBlock[] = [];
-      for (const call of calls) {
-        toolsUsed.push(call.name);
-        let output: Record<string, unknown> = {};
-        if (call.name === 'inspect_recent_sales_activity') {
+    const executableTools: ExecutableAgentTool[] = [
+      {
+        definition: byName.get('inspect_recent_sales_activity')!,
+        title: 'Inspect recent sales activity',
+        execute: async (input) => {
           const limit =
-            typeof call.input.limit === 'number'
-              ? Math.min(Math.max(Math.floor(call.input.limit), 1), MAX_SUPERVISOR_ACTIVITY_LIMIT)
+            typeof input.limit === 'number'
+              ? Math.min(Math.max(Math.floor(input.limit), 1), MAX_SUPERVISOR_ACTIVITY_LIMIT)
               : DEFAULT_SUPERVISOR_ACTIVITY_LIMIT;
           const [convs, events] = await Promise.all([
             this.listConversations(workspaceId),
             this.knowledge.listEvents(workspaceId, limit),
           ]);
-          output = {
-            conversations: convs.slice(0, limit).map((conv) => ({
-              id: conv.id,
-              source: conv.source,
-              channelType: conv.channelType,
-              title: conv.title,
-              handoffRequested: conv.handoffRequested,
-              updatedAt: conv.updatedAt,
-            })),
-            events,
+          return {
+            output: {
+              conversations: convs.slice(0, limit).map((conv) => ({
+                id: conv.id,
+                source: conv.source,
+                channelType: conv.channelType,
+                title: conv.title,
+                handoffRequested: conv.handoffRequested,
+                updatedAt: conv.updatedAt,
+              })),
+              events,
+            },
+            outcome: `${convs.length} conversation(s)`,
           };
-        } else if (call.name === 'search_catalog_products') {
-          const exec = await this.tools.execute(workspaceId, call.name, call.input, policy);
-          output = exec.output;
-        } else if (call.name === 'list_commercial_knowledge') {
+        },
+      },
+      {
+        definition: byName.get('search_catalog_products')!,
+        title: 'Search catalog products',
+        execute: async (input) => {
+          const exec = await this.tools.execute(workspaceId, 'search_catalog_products', input, policy);
+          return {
+            output: exec.output,
+            outcome: `${exec.matchedProductIds?.length ?? 0} match(es)`,
+          };
+        },
+      },
+      {
+        definition: byName.get('list_commercial_knowledge')!,
+        title: 'Query commercial knowledge',
+        execute: async () => {
           const [entries, proposals] = await Promise.all([
             this.knowledge.listEntries(workspaceId),
             this.knowledge.listProposals(workspaceId),
           ]);
-          output = {
-            entries,
-            pendingProposals: proposals.filter((prop) => prop.status === 'PENDING'),
+          return {
+            output: {
+              entries,
+              pendingProposals: proposals.filter((prop) => prop.status === 'PENDING'),
+            },
+            outcome: `${entries.length} rule(s)`,
           };
-        } else if (call.name === 'propose_commercial_knowledge') {
+        },
+      },
+      {
+        definition: byName.get('propose_commercial_knowledge')!,
+        title: 'Propose commercial knowledge rule',
+        execute: async (input) => {
           const asText = (value: unknown, fallback: string): string =>
             typeof value === 'string' && value.trim().length > 0 ? value.trim() : fallback;
           const created = await this.knowledge.createProposal(workspaceId, {
-            category: asText(call.input.category, 'business_info'),
-            scope: asText(call.input.scope, 'global'),
-            title: asText(call.input.title, 'Commercial rule'),
-            proposedContent: asText(call.input.proposedContent, ''),
-            rationale: typeof call.input.rationale === 'string' ? call.input.rationale : undefined,
+            category: asText(input.category, 'business_info'),
+            scope: asText(input.scope, 'global'),
+            title: asText(input.title, 'Commercial rule'),
+            proposedContent: asText(input.proposedContent, ''),
+            rationale: typeof input.rationale === 'string' ? input.rationale : undefined,
             originType: 'supervisor_chat',
             originConversationId: conversationId,
           });
           proposedLearningIds.push(created.id);
-          output = { proposalCreated: true, proposal: created };
-        }
-        resultBlocks.push({
-          type: AiContentBlockType.ToolResult,
-          toolUseId: call.id,
-          content: JSON.stringify(output),
-          isError: false,
-        });
-      }
-      messages.push({ role: AiConversationRole.User, content: resultBlocks });
-    }
+          return {
+            output: { proposalCreated: true, proposal: created },
+            outcome: 'Pending approval',
+            awaitingApproval: true,
+          };
+        },
+      },
+    ];
+
+    const result = await this.engine.runTurn(
+      {
+        workspaceId,
+        agentKey: 'sales',
+        feature: AiFeature.SalesAgent,
+        conversationKey: `${workspaceId}:sales:${conversationId}`,
+        systemPrompt: system,
+        locale: options?.locale ?? 'es-EC',
+        messages: [...history],
+        tools: executableTools,
+        maxSteps: MAX_TOOL_STEPS,
+        maxOutputTokens: MAX_OUTPUT_TOKENS,
+        externalSignal: options?.externalSignal,
+        fallbackText: 'Entendido. ¿Deseas que revise o proponga alguna regla adicional?',
+      },
+      options?.sink,
+    );
 
     return {
-      text: lastText || 'Entendido. ¿Deseas que revise o proponga alguna regla adicional?',
-      toolsUsed,
+      text: result.text,
+      toolsUsed: result.toolsUsed,
       proposedLearningIds,
     };
   }

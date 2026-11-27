@@ -1,15 +1,21 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { AiConfigStatus, PrismaService } from '@crossmart/database';
 import { AiContentBlockType } from '../ai/enums/ai-content-block-type.enum.js';
 import { AiConversationRole } from '../ai/enums/ai-conversation-role.enum.js';
 import { AiFeature } from '../ai/enums/ai-feature.enum.js';
-import { AiGateway } from '../ai/services/ai-gateway.service.js';
+import {
+  AgentExecutionEngine,
+  type AgentExecutionResult,
+  type AgentStreamSink,
+} from '../ai/services/agent-execution-engine.service.js';
 import { AgentConfigsService } from '../sales-agent/agent-configs.service.js';
 import { SalesKnowledgeService } from '../sales-agent/sales-knowledge.service.js';
+import { SocialAgentToolsService } from './social-agent-tools.service.js';
 import { SocialIntelligenceService } from './social-intelligence.service.js';
 import { TryPostConnectionService } from './trypost-connection.service.js';
 
-const MAX_SUPERVISOR_OUTPUT_TOKENS = 1100;
+const MAX_SUPERVISOR_OUTPUT_TOKENS = 1400;
+const MAX_SUPERVISOR_STEPS = 6;
 
 export type SocialNodeStatus = 'ok' | 'warning' | 'error' | 'unconfigured';
 
@@ -28,11 +34,10 @@ export interface SocialOperationalNode {
  */
 @Injectable()
 export class SocialAgentService {
-  private readonly logger = new Logger(SocialAgentService.name);
-
   constructor(
     private readonly prisma: PrismaService,
-    private readonly ai: AiGateway,
+    private readonly engine: AgentExecutionEngine,
+    private readonly tools: SocialAgentToolsService,
     private readonly agentConfigs: AgentConfigsService,
     private readonly knowledge: SalesKnowledgeService,
     private readonly intelligence: SocialIntelligenceService,
@@ -205,15 +210,27 @@ export class SocialAgentService {
     };
   }
 
+  /** Cancels an active Social Agent Supervisor turn by turnId. */
+  cancelSupervisorTurn(turnId: string): boolean {
+    return this.engine.cancelTurn(turnId);
+  }
+
   /**
-   * Natural-language Supervisor conversation for Agente Social.
-   * Dynamically adapts to ANY workspace sector using real catalog, shared business knowledge,
-   * optional creative profiles, and real TryPost status. Never exposes UUIDs or table names.
+   * Streaming Supervisor execution for Agente Social via Crossmart's shared `AgentExecutionEngine`.
+   * Executes real TryPost, catalog, knowledge, and Production tools and delivers structured results
+   * back to the model until a grounded final answer is produced.
    */
-  async chatWithSupervisor(
+  async streamSupervisorTurn(
     workspaceId: string,
-    input: { message: string; history?: Array<{ role: 'user' | 'assistant'; text: string }> },
-  ): Promise<{ reply: string; opportunitiesUsed: number }> {
+    input: {
+      message: string;
+      history?: Array<{ role: 'user' | 'assistant'; text: string }>;
+      locale?: string;
+      conversationKey?: string;
+    },
+    sink?: AgentStreamSink,
+    externalSignal?: AbortSignal,
+  ): Promise<AgentExecutionResult & { opportunitiesUsed: number }> {
     const [workspace, opportunities, knowledgeEntries, profiles, trypostConn, policy] =
       await Promise.all([
         this.prisma.workspace.findUnique({
@@ -228,39 +245,36 @@ export class SocialAgentService {
       ]);
 
     const contextSummary = [
-      `Negocio: ${workspace?.name ?? 'Workspace'} (moneda: ${workspace?.currency ?? 'USD'}).`,
-      `Catálogo: ${opportunities.totalProducts} producto(s) totales, ${opportunities.inStockProducts} con stock positivo. Categorías principales: ${opportunities.topCategories.join(', ') || 'sin categorizar'}.`,
-      `Oportunidades comerciales detectadas:`,
-      ...opportunities.opportunities.map((op) => `- [${op.suggestedPillar}] ${op.title}: ${op.rationale}`),
+      `Workspace: ${workspace?.name ?? 'Workspace'} (currency: ${workspace?.currency ?? 'USD'}).`,
+      `Catalog: ${opportunities.totalProducts} total product(s), ${opportunities.inStockProducts} in stock. Top categories: ${opportunities.topCategories.join(', ') || 'none'}.`,
       knowledgeEntries.length > 0
-        ? `Conocimiento comercial compartido:\n${knowledgeEntries
+        ? `Approved commercial knowledge:\n${knowledgeEntries
             .slice(0, 12)
             .map((k) => `- ${k.title}: ${k.content}`)
             .join('\n')}`
-        : 'Sin reglas de conocimiento comercial registradas aún.',
+        : 'No approved commercial knowledge entries yet.',
       profiles.length > 0
-        ? `Perfiles creativos configurados:\n${profiles
+        ? `Creative profiles:\n${profiles
             .slice(0, 5)
             .map((p) => `- ${p.name}: ${p.instructions.slice(0, 300)}`)
             .join('\n')}`
-        : 'Sin perfiles creativos personalizados (desarrolla dirección creativa original adaptada al negocio).',
+        : 'No custom creative profiles configured yet.',
       trypostConn?.status === 'CONNECTED'
-        ? `TryPost conectado con ${trypostConn.channels.length} cuenta(s): ${trypostConn.channels.map((c) => `${c.platform}:${c.name}`).join(', ')}.`
-        : 'TryPost no conectado todavía (puedes entregar estrategias, ideas, copies, guiones y composiciones listas para exportar).',
-      `Política operativa: modo ${policy.autonomyMode}, publicación automática ${policy.autoPublishAuthorized ? 'autorizada' : 'desactivada'}, pausado: ${policy.paused ? 'sí' : 'no'}.`,
+        ? `TryPost connected (${trypostConn.channels.length} cached account(s)). Use TryPost tools to inspect live accounts, posts, ideas, and analytics.`
+        : 'TryPost not connected yet (strategy, ideas, copy, scripts, and local Production drafts are available).',
+      `Operating policy: mode=${policy.autonomyMode}, autoPublish=${policy.autoPublishAuthorized ? 'enabled' : 'disabled'}, paused=${policy.paused ? 'yes' : 'no'}.`,
     ].join('\n');
 
-    const system = [
-      'Eres Agente Social de Crossmart: estratega de marketing orgánico, Community Manager y director creativo.',
-      'Reglas obligatorias:',
-      '1. Responde en lenguaje natural, claro, comercial y accionable. Nunca muestres UUIDs, nombres de tablas ni códigos técnicos internos.',
-      '2. Basa tus recomendaciones únicamente en la información real del negocio; nunca inventes precios, stock, márgenes, métricas ni tendencias virales.',
-      '3. No conviertas todo en anuncios de venta directa: equilibra contenido comercial, educativo, informativo y de marca.',
-      '4. Nunca promociones productos agotados salvo que el propietario solicite explícitamente preventa o próximo ingreso.',
-      '5. Si el usuario pide ideas, estrategias, carruseles, composiciones visuales o guiones audiovisuales, entrégalos estructurados, originales y listos para pasar a Producción o TryPost.',
-      '6. Respeta siempre las aprobaciones y límites operativos: nunca afirmes que publicaste algo sin confirmación real.',
+    const systemPrompt = [
+      'You are Crossmart Social Agent: organic marketing strategist, Community Manager, and creative director.',
+      'Mandatory operating rules:',
+      '1. Respond in clear, actionable, commercial natural language. Never expose UUIDs, database table names, or internal codes.',
+      '2. Always call your real tools when asked to inspect TryPost accounts, posts, calendar, ideas, analytics, catalog opportunities, or Production items. Never invent or guess remote data.',
+      '3. Never promote out-of-stock products automatically unless the owner explicitly requests a pre-sale or upcoming restock.',
+      '4. Balance commercial, educational, informative, and brand-building content.',
+      '5. Respect approvals and safety limits: never schedule or publish content automatically, and never claim something was published without confirmed execution.',
       '',
-      'Contexto actual del workspace:',
+      'Current workspace snapshot:',
       contextSummary,
     ].join('\n');
 
@@ -275,43 +289,75 @@ export class SocialAgentService {
       },
     ];
 
-    let reply = '';
-    try {
-      const turn = await this.ai.converse(
-        { workspaceId, feature: AiFeature.SalesAgent, agentKey: 'social' },
-        {
-          system,
-          messages,
-          tools: [],
-          maxOutputTokens: MAX_SUPERVISOR_OUTPUT_TOKENS,
-        },
-        { onTextDelta: () => undefined },
-      );
-      reply = turn.content
-        .filter((b) => b.type === AiContentBlockType.Text)
-        .map((b) => ('text' in b ? b.text : ''))
-        .join('')
-        .trim();
-    } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
-      this.logger.warn(`Social Supervisor AI call fallback: ${msg}`);
-      reply = [
-        `No hay un proveedor de IA disponible para responder en este momento (${msg}).`,
-        opportunities.opportunities.length > 0
-          ? `\nMientras configuras un proveedor de IA, detecté ${opportunities.opportunities.length} oportunidad(es) real(es) en tu catálogo:\n${opportunities.opportunities.map((o) => `- **${o.title}**: ${o.rationale}`).join('\n')}`
-          : '',
-      ].join('\n');
-    }
-
-    await this.prisma.socialAgentEvent.create({
-      data: {
+    const result = await this.engine.runTurn(
+      {
         workspaceId,
-        eventType: 'supervisor_chat',
-        summary: `Consulta al Supervisor de Agente Social: "${input.message.trim().slice(0, 70)}"`,
-        severity: 'info',
+        agentKey: 'social',
+        feature: AiFeature.SalesAgent,
+        conversationKey: input.conversationKey ?? `${workspaceId}:social:supervisor`,
+        systemPrompt,
+        locale: input.locale ?? 'es-EC',
+        messages,
+        tools: this.tools.buildTools(workspaceId),
+        maxSteps: MAX_SUPERVISOR_STEPS,
+        maxOutputTokens: MAX_SUPERVISOR_OUTPUT_TOKENS,
+        externalSignal,
+        fallbackText:
+          input.locale?.toLowerCase().startsWith('en')
+            ? 'I completed checking your workspace tools, but the AI provider returned an empty final summary. Please try again.'
+            : 'Completé la consulta de herramientas del espacio de trabajo, pero el proveedor de IA devolvió un resumen vacío. Inténtalo de nuevo.',
       },
-    });
+      sink,
+    );
 
-    return { reply, opportunitiesUsed: opportunities.opportunities.length };
+    await this.prisma.socialAgentEvent
+      .create({
+        data: {
+          workspaceId,
+          eventType: 'supervisor_chat',
+          summary: `Consulta al Supervisor de Agente Social: "${input.message.trim().slice(0, 70)}"`,
+          severity: result.status === 'failed' ? 'warn' : 'info',
+          metadata: {
+            turnId: result.turnId,
+            status: result.status,
+            toolsUsed: result.toolsUsed,
+          },
+        },
+      })
+      .catch(() => undefined);
+
+    return { ...result, opportunitiesUsed: opportunities.opportunities.length };
+  }
+
+  /**
+   * Synchronous wrapper over `streamSupervisorTurn` for backward compatibility.
+   */
+  async chatWithSupervisor(
+    workspaceId: string,
+    input: {
+      message: string;
+      history?: Array<{ role: 'user' | 'assistant'; text: string }>;
+      locale?: string;
+    },
+  ): Promise<{
+    reply: string;
+    opportunitiesUsed: number;
+    turnId: string;
+    status: string;
+    toolsUsed: string[];
+  }> {
+    const result = await this.streamSupervisorTurn(workspaceId, input);
+    const reply =
+      result.text ||
+      (result.error
+        ? `No se pudo completar la respuesta (${result.error}).`
+        : 'No se recibió respuesta del proveedor de IA.');
+    return {
+      reply,
+      opportunitiesUsed: result.opportunitiesUsed,
+      turnId: result.turnId,
+      status: result.status,
+      toolsUsed: result.toolsUsed,
+    };
   }
 }

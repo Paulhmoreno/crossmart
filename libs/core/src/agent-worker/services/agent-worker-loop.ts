@@ -10,6 +10,7 @@ import { AiFeature } from '../../ai/enums/ai-feature.enum.js';
 import { AiStopReason } from '../../ai/enums/ai-stop-reason.enum.js';
 import { agentWorkerSystemPrompt } from '../../ai/prompts/agent-worker.v1.prompt.js';
 import { AiGateway } from '../../ai/services/ai-gateway.service.js';
+import { sanitizeUnexpectedScripts } from '../../ai/services/agent-execution-engine.service.js';
 import {
   AGENT_WORKER_ANSWER_REFUSED,
   AGENT_WORKER_ANSWER_TRUNCATED,
@@ -100,7 +101,12 @@ export class AgentWorkerLoop {
         model: this.model,
         signal: run.signal,
       },
-      { onTextDelta: (delta) => run.sink.emit({ type: AgentWorkerEventType.TextDelta, delta }) },
+      {
+        onTextDelta: (delta) => {
+          const clean = sanitizeUnexpectedScripts(delta, 'es-EC');
+          if (clean) run.sink.emit({ type: AgentWorkerEventType.TextDelta, delta: clean });
+        },
+      },
     );
     await this.store.turns.recordModelCall(run.turnId, reply.model, reply.usage);
     return reply;

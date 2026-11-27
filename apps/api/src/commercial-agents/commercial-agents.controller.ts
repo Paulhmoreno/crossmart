@@ -10,7 +10,9 @@ import {
   Post,
   Put,
   Query,
+  Res,
 } from '@nestjs/common';
+import type { Response } from 'express';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import {
   type Actor,
@@ -33,6 +35,7 @@ import {
 import { WORKSPACE_ID_PARAM } from '../auth/auth.constants.js';
 import { CurrentActor } from '../auth/decorators/current-actor.decorator.js';
 import { RequirePermission } from '../auth/decorators/require-permission.decorator.js';
+import { openAgentSseStream } from './agent-sse.helper.js';
 
 @ApiTags('Commercial Agents')
 @Controller(`workspaces/:${WORKSPACE_ID_PARAM}`)
@@ -156,9 +159,40 @@ export class CommercialAgentsController {
   sendSalesMessage(
     @Param(WORKSPACE_ID_PARAM, ParseUUIDPipe) workspaceId: string,
     @Param('conversationId', ParseUUIDPipe) conversationId: string,
-    @Body() body: { text: string; context?: SalesChannelContext },
+    @Body() body: { text: string; context?: SalesChannelContext; locale?: string },
   ): Promise<SalesConversationDetail> {
-    return this.salesAgent.sendMessage(workspaceId, conversationId, body.text, body.context);
+    return this.salesAgent.sendMessage(workspaceId, conversationId, body.text, body.context, {
+      locale: body.locale,
+    });
+  }
+
+  @Post('sales-agent/conversations/:conversationId/stream')
+  @RequirePermission(WorkspacePermission.ViewWorkspace)
+  @ApiOperation({ summary: 'Streaming SSE turn for Sales Agent Supervisor or Simulation' })
+  async streamSalesMessage(
+    @Param(WORKSPACE_ID_PARAM, ParseUUIDPipe) workspaceId: string,
+    @Param('conversationId', ParseUUIDPipe) conversationId: string,
+    @Body() body: { text: string; context?: SalesChannelContext; locale?: string },
+    @Res() res: Response,
+  ): Promise<void> {
+    const stream = openAgentSseStream(res);
+    try {
+      await this.salesAgent.sendMessage(workspaceId, conversationId, body.text, body.context, {
+        locale: body.locale,
+        sink: stream.sink,
+        externalSignal: stream.signal,
+      });
+    } finally {
+      stream.close();
+    }
+  }
+
+  @Post('sales-agent/turns/:turnId/cancel')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermission(WorkspacePermission.ViewWorkspace)
+  @ApiOperation({ summary: 'Cancel an active Sales Agent turn' })
+  cancelSalesTurn(@Param('turnId') turnId: string) {
+    return { cancelled: this.salesAgent.cancelTurn(turnId) };
   }
 
   @Delete('sales-agent/conversations/:conversationId')

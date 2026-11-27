@@ -11,7 +11,9 @@ import {
   Post,
   Put,
   Query,
+  Res,
 } from '@nestjs/common';
+import type { Response } from 'express';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import {
   type Actor,
@@ -23,6 +25,7 @@ import {
 import { WORKSPACE_ID_PARAM } from '../auth/auth.constants.js';
 import { CurrentActor } from '../auth/decorators/current-actor.decorator.js';
 import { RequirePermission } from '../auth/decorators/require-permission.decorator.js';
+import { openAgentSseStream } from './agent-sse.helper.js';
 
 @ApiTags('Social Marketing Agent')
 @Controller('workspaces/:workspaceId/social-agent')
@@ -45,9 +48,43 @@ export class SocialAgentController {
   @ApiOperation({ summary: 'Natural-language conversation with the Social Agent Supervisor' })
   chat(
     @Param(WORKSPACE_ID_PARAM, ParseUUIDPipe) workspaceId: string,
-    @Body() body: { message: string; history?: Array<{ role: 'user' | 'assistant'; text: string }> },
+    @Body()
+    body: {
+      message: string;
+      history?: Array<{ role: 'user' | 'assistant'; text: string }>;
+      locale?: string;
+    },
   ) {
     return this.agent.chatWithSupervisor(workspaceId, body);
+  }
+
+  @Post('supervisor/stream')
+  @RequirePermission(WorkspacePermission.EditProducts)
+  @ApiOperation({ summary: 'Streaming SSE conversation with the Social Agent Supervisor' })
+  async streamChat(
+    @Param(WORKSPACE_ID_PARAM, ParseUUIDPipe) workspaceId: string,
+    @Body()
+    body: {
+      message: string;
+      history?: Array<{ role: 'user' | 'assistant'; text: string }>;
+      locale?: string;
+    },
+    @Res() res: Response,
+  ) {
+    const stream = openAgentSseStream(res);
+    try {
+      await this.agent.streamSupervisorTurn(workspaceId, body, stream.sink, stream.signal);
+    } finally {
+      stream.close();
+    }
+  }
+
+  @Post('supervisor/cancel/:turnId')
+  @RequirePermission(WorkspacePermission.EditProducts)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Cancel an active Social Agent Supervisor turn' })
+  cancelTurn(@Param('turnId') turnId: string) {
+    return { cancelled: this.agent.cancelSupervisorTurn(turnId) };
   }
 
   @Put('policy')

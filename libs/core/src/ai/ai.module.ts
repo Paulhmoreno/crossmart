@@ -7,6 +7,7 @@ import { AnthropicClientFactory } from './providers/anthropic/anthropic-client.f
 import { AiProvider } from './providers/ai-provider.js';
 import { AiUsageRepository } from './repositories/ai-usage.repository.js';
 import { PlatformAiUsageRepository } from './repositories/platform-ai-usage.repository.js';
+import { AgentExecutionEngine } from './services/agent-execution-engine.service.js';
 import { AiConfigService } from './services/ai-config.service.js';
 import { AiConnectionsService } from './services/ai-connections.service.js';
 import { AiCredentialsVault } from './services/ai-credentials.vault.js';
@@ -16,7 +17,7 @@ import { AiUsageService } from './services/ai-usage.service.js';
 /**
  * The AI layer: the `AiProvider` abstraction (OpenAI, Anthropic, Gemini, OpenAI-compatible,
  * and Anthropic-compatible), multi-connection encrypted configuration, metering of every call,
- * and `AiGateway`, through which agents call the model.
+ * `AiGateway`, and the shared `AgentExecutionEngine` used across Crossmart agents.
  */
 @Module({
   imports: [EntitlementsModule, CredentialsModule, ActivityModule],
@@ -30,7 +31,14 @@ import { AiUsageService } from './services/ai-usage.service.js';
     PlatformAiUsageRepository,
     AiUsageService,
     AiGateway,
+    AgentExecutionEngine,
   ],
-  exports: [AiGateway, AiUsageService, AiConfigService, AiConnectionsService],
+  exports: [
+    AiGateway,
+    AiUsageService,
+    AiConfigService,
+    AiConnectionsService,
+    AgentExecutionEngine,
+  ],
 })
 export class AiModule {}

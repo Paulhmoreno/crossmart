@@ -8,6 +8,7 @@ import {
 import { AiContentBlockType } from '../ai/enums/ai-content-block-type.enum.js';
 import { AiProviderName } from '../ai/enums/ai-provider-name.enum.js';
 import { AiStopReason } from '../ai/enums/ai-stop-reason.enum.js';
+import { AgentExecutionEngine } from '../ai/services/agent-execution-engine.service.js';
 import { AiConnectionsService } from '../ai/services/ai-connections.service.js';
 import { ChannelPriceResolver } from '../listings/services/channel-price-resolver.js';
 import { SalesAgentService } from './sales-agent.service.js';
@@ -167,7 +168,13 @@ describe('SalesAgentService Chatwoot webhook pipeline', () => {
       }),
     };
     const tools = {
-      definitions: vi.fn().mockReturnValue([]),
+      definitions: vi.fn().mockReturnValue([
+        {
+          name: 'handoff_to_human',
+          description: 'Transfer conversation to a human specialist',
+          inputSchema: { type: 'object', properties: { reason: { type: 'string' } } },
+        },
+      ]),
       execute: vi.fn().mockResolvedValue({
         output: { handedOff: true },
         handoff: { reason: 'Buyer requested invoice discount' },
@@ -196,9 +203,10 @@ describe('SalesAgentService Chatwoot webhook pipeline', () => {
       listProposals: vi.fn().mockResolvedValue([]),
       listEvents: vi.fn().mockResolvedValue([]),
     };
+    const engine = new AgentExecutionEngine(ai as never);
     const service = new SalesAgentService(
       prisma as never,
-      ai as never,
+      engine,
       configs as never,
       tools as never,
       knowledge as never,
