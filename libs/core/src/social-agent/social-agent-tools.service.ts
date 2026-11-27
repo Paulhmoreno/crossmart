@@ -616,6 +616,224 @@ export class SocialAgentToolsService {
           };
         },
       },
+      {
+        title: 'List TryPost media library',
+        timeoutMs: EXTERNAL_TOOL_TIMEOUT_MS,
+        definition: {
+          name: 'list_trypost_media',
+          description: 'List uploaded media assets currently available in the connected TryPost media library.',
+          inputSchema: { type: 'object', properties: {} },
+        },
+        execute: async () => {
+          const auth = await this.trypostConnections.openAuth(workspaceId);
+          if (!auth) return { output: { connected: false, media: [] }, outcome: 'TryPost not connected' };
+          const media = await this.trypostClient.listMedia(auth);
+          return { output: { count: media.length, media: media.slice(0, 20) }, outcome: `${media.length} media` };
+        },
+      },
+      {
+        title: 'Update remote draft in TryPost',
+        timeoutMs: EXTERNAL_TOOL_TIMEOUT_MS,
+        definition: {
+          name: 'update_trypost_draft',
+          description:
+            'Update the copy or attached media of an existing remote TryPost draft (never schedules or publishes; enforces public confidentiality guard).',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              postId: { type: 'string', description: 'TryPost draft post ID' },
+              content: { type: 'string', description: 'Updated public post copy (no internal margins/costs)' },
+              mediaTokens: { type: 'array', items: { type: 'string' } },
+            },
+            required: ['postId'],
+          },
+        },
+        execute: async (input) => {
+          const auth = await this.trypostConnections.openAuth(workspaceId);
+          if (!auth) return { output: { error: 'TryPost not connected.' }, isError: true, outcome: 'TryPost not connected' };
+          const postId = typeof input.postId === 'string' ? input.postId.trim() : '';
+          const content = typeof input.content === 'string' ? input.content.trim() : undefined;
+          const mediaTokens = Array.isArray(input.mediaTokens)
+            ? input.mediaTokens.filter((t): t is string => typeof t === 'string' && t.trim().length > 0)
+            : undefined;
+          if (!postId) return { output: { error: 'postId is required.' }, isError: true };
+          if (content) assertPublicContentSafe(content, 'TryPost remote draft update');
+          const updated = await this.trypostClient.updatePost(auth, postId, { content, mediaTokens });
+          return { output: { updated: true, postId: updated.id, status: updated.status }, outcome: 'Draft updated' };
+        },
+      },
+      {
+        title: 'Add internal review note in TryPost',
+        timeoutMs: EXTERNAL_TOOL_TIMEOUT_MS,
+        definition: {
+          name: 'add_trypost_post_note',
+          description: 'Add a non-published collaborative review note to an existing TryPost post/draft.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              postId: { type: 'string', description: 'TryPost post ID' },
+              body: { type: 'string', description: 'Review note text (no secrets or credentials)' },
+            },
+            required: ['postId', 'body'],
+          },
+        },
+        execute: async (input) => {
+          const auth = await this.trypostConnections.openAuth(workspaceId);
+          if (!auth) return { output: { error: 'TryPost not connected.' }, isError: true, outcome: 'TryPost not connected' };
+          const postId = typeof input.postId === 'string' ? input.postId.trim() : '';
+          const body = typeof input.body === 'string' ? input.body.trim() : '';
+          if (!postId || !body) return { output: { error: 'postId and body are required.' }, isError: true };
+          assertPublicContentSafe(body, 'TryPost post note');
+          const created = await this.trypostClient.addPostNote(auth, postId, body);
+          return { output: { created: true, noteId: created.id, postId }, outcome: 'Note added' };
+        },
+      },
+      {
+        title: 'Query TryPost labels',
+        timeoutMs: EXTERNAL_TOOL_TIMEOUT_MS,
+        definition: {
+          name: 'list_trypost_labels',
+          description: 'Query available workspace labels/tags in TryPost.',
+          inputSchema: { type: 'object', properties: {} },
+        },
+        execute: async () => {
+          const auth = await this.trypostConnections.openAuth(workspaceId);
+          if (!auth) return { output: { connected: false, labels: [] }, outcome: 'TryPost not connected' };
+          const res = await this.trypostClient.listLabels(auth);
+          return {
+            output: res,
+            outcome: res.supported ? `${res.labels.length} label(s)` : 'Not exposed by REST API',
+          };
+        },
+      },
+      {
+        title: 'Research live web market trends',
+        timeoutMs: EXTERNAL_TOOL_TIMEOUT_MS,
+        definition: {
+          name: 'research_market_trends',
+          description:
+            'Perform a free, read-only live web search for current market/topic references and educational angles (zero external cost). Clearly separated from prior model knowledge.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              query: { type: 'string', description: 'Search query (e.g. product category, buyer questions, seasonal topic)' },
+            },
+            required: ['query'],
+          },
+        },
+        execute: async (input) => {
+          const query = typeof input.query === 'string' ? input.query.trim() : '';
+          if (!query) return { output: { error: 'Query is required.' }, isError: true };
+          const results: Array<{ title: string; snippet: string; url: string }> = [];
+          try {
+            const ddgUrl = `https://api.duckduckgo.com/?q=${encodeURIComponent(query)}&format=json&no_html=1&skip_disambig=1`;
+            const res = await fetch(ddgUrl, { signal: AbortSignal.timeout(10_000) });
+            if (res.ok) {
+              const data = (await res.json()) as {
+                Heading?: string;
+                AbstractText?: string;
+                AbstractURL?: string;
+                RelatedTopics?: Array<{ Text?: string; FirstURL?: string }>;
+              };
+              if (data.AbstractText) {
+                results.push({
+                  title: data.Heading || query,
+                  snippet: data.AbstractText.slice(0, 300),
+                  url: data.AbstractURL || '',
+                });
+              }
+              for (const topic of (data.RelatedTopics ?? []).slice(0, 5)) {
+                if (topic.Text) {
+                  results.push({
+                    title: topic.Text.split(' - ')[0]?.slice(0, 80) || query,
+                    snippet: topic.Text.slice(0, 260),
+                    url: topic.FirstURL || '',
+                  });
+                }
+              }
+            }
+          } catch {
+            // Fall through to Wikipedia OpenSearch if DDG Instant returns empty/timeout.
+          }
+          if (results.length === 0) {
+            try {
+              const wikiUrl = `https://es.wikipedia.org/w/api.php?action=opensearch&search=${encodeURIComponent(query)}&limit=5&namespace=0&format=json`;
+              const wRes = await fetch(wikiUrl, { signal: AbortSignal.timeout(10_000) });
+              if (wRes.ok) {
+                const parsed = (await wRes.json()) as [string, string[], string[], string[]];
+                const titles = parsed[1] ?? [];
+                const descs = parsed[2] ?? [];
+                const urls = parsed[3] ?? [];
+                for (let idx = 0; idx < titles.length; idx += 1) {
+                  results.push({
+                    title: titles[idx] ?? query,
+                    snippet: descs[idx] ?? '',
+                    url: urls[idx] ?? '',
+                  });
+                }
+              }
+            } catch {
+              // Network unavailable in sandboxed or offline mode.
+            }
+          }
+          return {
+            output: { source: 'live_web_research', query, count: results.length, results },
+            outcome: `${results.length} web result(s)`,
+          };
+        },
+      },
+      {
+        title: 'Analyze private profitability (admin only)',
+        timeoutMs: LOCAL_TOOL_TIMEOUT_MS,
+        definition: {
+          name: 'analyze_private_profitability',
+          description:
+            'INTERNAL ADMIN ONLY: inspect verified product prices, acquisition costs, and profit margins for private strategic prioritization. NEVER copy costs or margins into public posts, ideas, captions, or buyer messages.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              limit: { type: 'number', description: 'Max items (1-30, default 10).' },
+            },
+          },
+        },
+        execute: async (input) => {
+          const limit = typeof input.limit === 'number' ? input.limit : 10;
+          const report = await this.intelligence.analyzePrivateProfitability(workspaceId, limit);
+          return {
+            output: {
+              ...report,
+              confidentialityWarning:
+                'INTERNAL ADMIN ONLY: NEVER include cost or margin percentages in public posts, ideas, or drafts.',
+            },
+            outcome: `${report.items.length} analyzed`,
+          };
+        },
+      },
+      {
+        title: 'Run editorial calendar planning review',
+        timeoutMs: EXTERNAL_TOOL_TIMEOUT_MS,
+        definition: {
+          name: 'run_editorial_planning_cycle',
+          description:
+            'Run a controlled editorial planning review: inspect TryPost calendar, detect content gaps, evaluate analytics, and optionally prepare a local editorial proposal (never schedules or publishes).',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              dryRun: { type: 'boolean', description: 'If true, only analyze without creating a local proposal.' },
+            },
+          },
+        },
+        execute: async (input) => {
+          const res = await this.intelligence.runEditorialPlanningCycle(workspaceId, {
+            dryRun: input.dryRun !== false,
+            trigger: 'manual',
+          });
+          return {
+            output: res,
+            outcome: res.contentGapDetected ? 'Calendar gap detected' : 'Calendar covered',
+          };
+        },
+      },
     ];
   }
 }

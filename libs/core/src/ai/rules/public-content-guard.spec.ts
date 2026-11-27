@@ -44,4 +44,17 @@ describe('public-content-guard (P0 adversarial confidentiality tests)', () => {
     expect(redacted).not.toContain('32.9');
     expect(redacted).toContain('$120');
   });
+
+  it('blocks implicit cost/profit phrasing across notes, descriptions, ideas, and posts', () => {
+    const cases = [
+      'Nota interna: este modelo nos cuesta $22 en bodega.',
+      'Descripción: artículo importado a precio de fábrica para revender.',
+      'Idea: promocionar porque ganamos $45 por cada unidad vendida.',
+      'Draft: wholesale price is $18 so we have huge net profit of $30.',
+    ];
+    for (const sample of cases) {
+      expect(findConfidentialLeaks(sample).length).toBeGreaterThan(0);
+      expect(() => assertPublicContentSafe(sample, 'public asset')).toThrow();
+    }
+  });
 });

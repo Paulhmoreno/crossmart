@@ -309,7 +309,7 @@ export class SocialAgentService {
 
     const contextSummary = [
       `Workspace: ${workspace?.name ?? 'Workspace'} (currency: ${workspace?.currency ?? 'USD'}).`,
-      `Full catalog totals: ${opportunities.totalProducts} total product(s), ${opportunities.inStockProducts} in stock, ${opportunities.eligibleProducts} with multi-unit stock (>=2). Top categories: ${opportunities.topCategories.join(', ') || 'none'}.`,
+      `Full catalog totals: ${opportunities.totalProducts} total product(s), ${opportunities.inStockProducts} in stock (${opportunities.multiUnitProducts} multi-unit, ${opportunities.singleUnitProducts} single-unit). Top categories: ${opportunities.topCategories.join(', ') || 'none'}.`,
       knowledgeEntries.length > 0
         ? `Approved commercial knowledge (RESPECT SCOPE — never apply marketplace-only policies to social networks):\n${knowledgeEntries
             .slice(0, 12)

@@ -11,6 +11,8 @@ import {
   ASK_RETENTION_JOB_NAME,
   SANDBOX_SWEEP_JOB_NAME,
   SandboxSweeper,
+  SOCIAL_PLANNING_JOB_NAME,
+  SocialIntelligenceService,
 } from '@crossmart/core';
 import { ConversationRetention } from './conversation-retention.js';
 
@@ -24,6 +26,7 @@ export class MaintenanceProcessor extends WorkerHost {
     private readonly sandboxes: SandboxSweeper,
     private readonly retention: ConversationRetention,
     private readonly agentProposalExpiry: AgentProposalExpiryService,
+    private readonly socialIntelligence: SocialIntelligenceService,
   ) {
     super();
   }
@@ -40,6 +43,8 @@ export class MaintenanceProcessor extends WorkerHost {
         return this.purgeAgentWorkerConversations();
       case AGENT_PROPOSAL_EXPIRY_JOB_NAME:
         return this.expireAgentProposals();
+      case SOCIAL_PLANNING_JOB_NAME:
+        return this.runSocialPlanning();
       default:
         this.logger.warn(`Skipped unknown maintenance job ${job.name}`);
     }
@@ -81,6 +86,15 @@ export class MaintenanceProcessor extends WorkerHost {
     const expired = await this.agentProposalExpiry.expire();
     if (expired > 0) {
       this.logger.log(`Expired ${expired} agent proposals nobody decided in time`);
+    }
+  }
+
+  private async runSocialPlanning(): Promise<void> {
+    const { checked, executed } = await this.socialIntelligence.runAuthorizedPeriodicPlanning();
+    if (checked > 0) {
+      this.logger.log(
+        `Social editorial planning cycle: ${executed}/${checked} authorized workspace(s) processed`,
+      );
     }
   }
 }

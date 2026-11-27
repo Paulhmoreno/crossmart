@@ -22,7 +22,11 @@ const LEAK_RULES: Array<{
   {
     category: 'internal_cost',
     pattern:
-      /\b(?:costo\s+de\s+adquisici[oó]n|precio\s+de\s+costo|nuestro\s+costo|costo\s+interno|costo\s+unitario|acquisition\s+cost|cost\s+price|our\s+cost|wholesale\s+cost|landed\s+cost)\b/gi,
+      /\b(?:costo\s+de\s+adquisici[oó]n|precio\s+de\s+costo|precio\s+de\s+f[aá]brica|nuestro\s+costo|nos\s+cuesta|costo\s+interno|costo\s+real|costo\s+unitario|acquisition\s+cost|cost\s+price|our\s+cost|wholesale\s+(?:cost|price)|landed\s+cost)\b/gi,
+  },
+  {
+    category: 'internal_margin',
+    pattern: /\b(?:ganamos|utilidad\s+de|net\s+profit\s+of)\s+\$?\s*\d+(?:[.,]\d+)?/gi,
   },
   {
     category: 'supplier_info',

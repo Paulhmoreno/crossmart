@@ -153,4 +153,48 @@ describe('AgentExecutionEngine', () => {
       'Audio-Technica AT-LP60X $199',
     );
   });
+
+  it('cancels an active turn mid-tool execution and immediately releases the concurrency lock', async () => {
+    const ai = makeAiMock([{ toolCalls: [{ id: 'tc-cancel', name: 'slow_ext', input: {} }] }]);
+    const engine = new AgentExecutionEngine(ai);
+    let capturedTurnId = '';
+
+    const runPromise = engine.runTurn(
+      {
+        workspaceId: 'ws-1',
+        agentKey: 'social',
+        feature: AiFeature.SalesAgent,
+        conversationKey: 'ws-1:social:conv-cancel',
+        systemPrompt: 'Test',
+        locale: 'es-EC',
+        messages: [
+          { role: AiConversationRole.User, content: [{ type: AiContentBlockType.Text, text: 'Run' }] },
+        ],
+        tools: [
+          {
+            title: 'Slow external tool',
+            timeoutMs: 5000,
+            definition: { name: 'slow_ext', description: 'S', inputSchema: { type: 'object', properties: {} } },
+            execute: (_input, { signal }) =>
+              new Promise((_resolve, reject) => {
+                signal.addEventListener('abort', () => reject(new Error('Cancelled')), { once: true });
+              }),
+          },
+        ],
+      },
+      {
+        emit: (ev) => {
+          if (ev.type === 'turn_started') capturedTurnId = ev.turnId;
+          if (ev.type === 'tool_started' && capturedTurnId) {
+            expect(engine.cancelTurn(capturedTurnId)).toBe(true);
+          }
+        },
+      },
+    );
+
+    const result = await runPromise;
+    expect(result.status).toBe('cancelled');
+    expect(result.toolRuns[0]?.status).toBe('cancelled');
+    expect(engine.getActiveTurnId('ws-1:social:conv-cancel')).toBeNull();
+  });
 });

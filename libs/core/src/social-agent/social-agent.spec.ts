@@ -61,6 +61,48 @@ describe('Agente Social — Universalidad, Aislamiento, Aprobaciones y Presupues
     expect(vetOps.topCategories).toEqual(['Nutrición Veterinaria']);
     expect(vetOps.opportunities.some((o) => o.title.includes('Hipoalergénico'))).toBe(true);
     expect(vetOps.opportunities.some((o) => o.title.includes('Bourbon'))).toBe(false);
+
+    // Architectural data separation: public opportunities NEVER contain internal cost or margin fields
+    for (const op of [...coffeeOps.opportunities, ...vetOps.opportunities]) {
+      expect('cost' in op).toBe(false);
+      expect('verifiableMarginPct' in op).toBe(false);
+    }
+  });
+
+  it('considers single-unit products with lightweight creative effort and gates periodic worker by autonomy', async () => {
+    const prismaSingle = {
+      product: {
+        count: vi.fn().mockResolvedValueOnce(1).mockResolvedValueOnce(1).mockResolvedValueOnce(0),
+        groupBy: vi.fn().mockResolvedValue([{ productType: 'Coleccionables', _count: { _all: 1 } }]),
+        findMany: vi.fn().mockResolvedValue([
+          {
+            id: 'p-unique',
+            title: 'Edición Limitada Vinilo',
+            productType: 'Coleccionables',
+            media: [{ url: 'https://cdn.example.com/vinyl.jpg' }],
+            variants: [{ sku: 'VIN-1', price: '120.00', inventoryItem: { available: 1 } }],
+          },
+        ]),
+      },
+      socialBudgetPolicy: {
+        findUnique: vi.fn().mockResolvedValue({
+          workspaceId: 'ws-u',
+          autonomyMode: 'SUPERVISED',
+          paused: false,
+        }),
+      },
+    } as never;
+
+    const svc = new SocialIntelligenceService(prismaSingle, {} as never, {} as never);
+    const analysis = await svc.analyzeBusinessOpportunities('ws-u');
+    const featured = analysis.opportunities.find((o) => o.productId === 'p-unique');
+    expect(featured).toBeDefined();
+    expect(featured?.availabilityTier).toBe('single_unit');
+    expect(featured?.creativeEffort).toBe('lightweight_quick');
+
+    // Periodic worker skips SUPERVISED workspaces until owner explicitly authorizes AUTOMATIC
+    const cycle = await svc.runEditorialPlanningCycle('ws-u', { trigger: 'worker', dryRun: true });
+    expect(cycle.skippedReason).toBe('autonomy_mode_supervised');
   });
 
   it('invalida aprobaciones al editar contenido y bloquea programación en TryPost sin aprobación vigente', async () => {

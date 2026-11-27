@@ -126,6 +126,20 @@ export class SocialAgentController {
     return { cancelled: this.agent.cancelSupervisorTurn(turnId) };
   }
 
+  @Post('planning/run')
+  @RequirePermission(WorkspacePermission.ManageWorkspace)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Run a controlled Social Agent editorial planning review (non-publishing)' })
+  runPlanningCycle(
+    @Param(WORKSPACE_ID_PARAM, ParseUUIDPipe) workspaceId: string,
+    @Body() body?: { dryRun?: boolean },
+  ) {
+    return this.intelligence.runEditorialPlanningCycle(workspaceId, {
+      dryRun: body?.dryRun !== false,
+      trigger: 'manual',
+    });
+  }
+
   @Put('policy')
   @RequirePermission(WorkspacePermission.ManageWorkspace)
   @ApiOperation({ summary: 'Update Social Agent autonomy mode, pause state, and creative budget limits' })

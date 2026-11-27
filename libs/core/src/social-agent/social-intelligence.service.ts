@@ -11,16 +11,33 @@ import { assertPublicContentSafe } from '../ai/rules/public-content-guard.js';
 import { TryPostClient } from './trypost.client.js';
 import { TryPostConnectionService } from './trypost-connection.service.js';
 
+export const SOCIAL_PLANNING_SCHEDULER_ID = 'social-editorial-planning-periodic';
+export const SOCIAL_PLANNING_JOB_NAME = 'social-editorial-planning';
+export const SOCIAL_PLANNING_INTERVAL_MS = 6 * 60 * 60 * 1000;
+
+/** Strictly public-safe commercial opportunity projection (NEVER contains cost or margin fields). */
 export interface CommercialOpportunity {
-  type: 'HIGH_STOCK' | 'HIGH_MARGIN' | 'NEW_ARRIVAL' | 'EDUCATIONAL' | 'CATEGORY_SPOTLIGHT';
+  type: 'HIGH_STOCK' | 'SINGLE_UNIT_FEATURED' | 'EDUCATIONAL' | 'CATEGORY_SPOTLIGHT';
   title: string;
   rationale: string;
   productId?: string;
   sku?: string | null;
   price?: number | null;
   availableStock?: number | null;
-  verifiableMarginPct?: number | null;
+  availabilityTier?: 'single_unit' | 'moderate' | 'high';
+  creativeEffort?: 'lightweight_quick' | 'standard' | 'flagship';
   suggestedPillar: 'commercial' | 'educational' | 'informative' | 'brand';
+}
+
+/** Private internal profitability record (strictly for admin/Ads ROAS analysis, never public copy). */
+export interface PrivateProfitabilityItem {
+  productId: string;
+  title: string;
+  sku: string | null;
+  price: number;
+  cost: number;
+  verifiableMarginPct: number;
+  availableStock: number;
 }
 
 export interface VisualCompositionInput {
@@ -132,19 +149,21 @@ export class SocialIntelligenceService {
 
   /**
    * Analyzes the FULL workspace catalog using real aggregate counts (never truncating at 100)
-   * and selects commercially reasoned candidates without exposing internal costs/margins in
-   * public-facing rationales. Excludes out-of-stock products from automatic promotion and avoids
-   * over-prioritizing single-unit items.
+   * and returns STRICTLY PUBLIC-SAFE commercial opportunities (no cost/margin fields in the
+   * projection). Treats inventory as a continuous variable so single-unit products with strong
+   * commercial justification (e.g. unique/high-value items with real photos) remain eligible with
+   * lightweight creative effort, while out-of-stock products remain protected from auto-promotion.
    */
   async analyzeBusinessOpportunities(workspaceId: string): Promise<{
     totalProducts: number;
     inStockProducts: number;
-    eligibleProducts: number;
+    singleUnitProducts: number;
+    multiUnitProducts: number;
     analyzedSample: number;
     topCategories: string[];
     opportunities: CommercialOpportunity[];
   }> {
-    const [totalProducts, inStockProducts, eligibleProducts, categoryGroups, candidates] =
+    const [totalProducts, inStockProducts, multiUnitProducts, categoryGroups, candidates] =
       await Promise.all([
         this.prisma.product.count({ where: { workspaceId } }),
         this.prisma.product.count({
@@ -175,9 +194,17 @@ export class SocialIntelligenceService {
             workspaceId,
             variants: { some: { inventoryItem: { available: { gt: 0 } } } },
           },
-          include: {
+          select: {
+            id: true,
+            title: true,
+            productType: true,
             variants: {
-              include: { inventoryItem: true },
+              select: {
+                sku: true,
+                price: true,
+                // NOTE: `cost` is intentionally NOT selected in public opportunity queries!
+                inventoryItem: { select: { available: true } },
+              },
             },
             media: {
               orderBy: { position: 'asc' },
@@ -190,6 +217,7 @@ export class SocialIntelligenceService {
         }),
       ]);
 
+    const singleUnitProducts = Math.max(0, inStockProducts - multiUnitProducts);
     const topCategories = categoryGroups
       .map((g) => g.productType)
       .filter((c): c is string => Boolean(c && c.trim()));
@@ -203,13 +231,20 @@ export class SocialIntelligenceService {
         const primary = prod.variants[0];
         const price = primary ? Number(primary.price) : null;
         const hasImage = prod.media.length > 0;
-        // Prefer products with >= 2 units in stock and real photography to avoid wasting
-        // creative effort on single-unit items.
+        const availabilityTier: CommercialOpportunity['availabilityTier'] =
+          totalAvailable >= 5 ? 'high' : totalAvailable >= 2 ? 'moderate' : 'single_unit';
+        const creativeEffort: CommercialOpportunity['creativeEffort'] =
+          availabilityTier === 'high'
+            ? 'flagship'
+            : availabilityTier === 'moderate'
+              ? 'standard'
+              : 'lightweight_quick';
+        // Continuous scoring combining stock availability, real photography, and public price signal
         const score =
-          (totalAvailable >= 5 ? 30 : totalAvailable >= 2 ? 15 : 2) +
+          Math.min(30, totalAvailable * 4) +
           (hasImage ? 20 : 0) +
-          (price && price > 0 ? 10 : 0);
-        return { prod, totalAvailable, primary, price, hasImage, score };
+          (price && price > 0 ? Math.min(15, Math.log10(price + 1) * 5) : 0);
+        return { prod, totalAvailable, primary, price, hasImage, availabilityTier, creativeEffort, score };
       })
       .filter((entry) => entry.totalAvailable > 0)
       .sort((a, b) => b.score - a.score || b.totalAvailable - a.totalAvailable);
@@ -217,19 +252,26 @@ export class SocialIntelligenceService {
     const opportunities: CommercialOpportunity[] = [];
     for (const entry of scored) {
       if (opportunities.length >= 6) break;
-      if (entry.totalAvailable < 2 && eligibleProducts >= 3) continue;
+      const isSingle = entry.availabilityTier === 'single_unit';
       opportunities.push({
-        type: entry.totalAvailable >= 5 ? 'HIGH_STOCK' : 'CATEGORY_SPOTLIGHT',
+        type:
+          entry.availabilityTier === 'high'
+            ? 'HIGH_STOCK'
+            : isSingle
+              ? 'SINGLE_UNIT_FEATURED'
+              : 'CATEGORY_SPOTLIGHT',
         title: `Destacar en catálogo: ${entry.prod.title}`,
         rationale: `Disponibilidad verificada de ${entry.totalAvailable} unidad(es)${
           entry.price ? ` · precio público $${entry.price.toFixed(2)}` : ''
-        }${entry.hasImage ? ' · cuenta con fotografía real en catálogo' : ''}.`,
+        }${entry.hasImage ? ' · cuenta con fotografía real en catálogo' : ''}${
+          isSingle ? ' · recomendado formato ligero/rápido por unidad única' : ''
+        }.`,
         productId: entry.prod.id,
         sku: entry.primary?.sku ?? null,
         price: entry.price,
         availableStock: entry.totalAvailable,
-        // Never expose internal margin percentage into public-copy opportunities
-        verifiableMarginPct: null,
+        availabilityTier: entry.availabilityTier,
+        creativeEffort: entry.creativeEffort,
         suggestedPillar: 'commercial',
       });
     }
@@ -239,6 +281,7 @@ export class SocialIntelligenceService {
         type: 'EDUCATIONAL',
         title: `Guía práctica para elegir en ${topCategories[0]}`,
         rationale: `Categoría principal con stock verificado (${topCategories[0]}); contenido educativo fortalece autoridad sin depender únicamente de venta directa.`,
+        creativeEffort: 'standard',
         suggestedPillar: 'educational',
       });
     } else if (totalProducts > 0) {
@@ -246,6 +289,7 @@ export class SocialIntelligenceService {
         type: 'EDUCATIONAL',
         title: 'Contenido educativo sobre cómo elegir y aprovechar el catálogo',
         rationale: 'Equilibra el calendario editorial con valor informativo y preguntas frecuentes de clientes.',
+        creativeEffort: 'standard',
         suggestedPillar: 'educational',
       });
     }
@@ -253,11 +297,209 @@ export class SocialIntelligenceService {
     return {
       totalProducts,
       inStockProducts,
-      eligibleProducts,
+      singleUnitProducts,
+      multiUnitProducts,
       analyzedSample: candidates.length,
       topCategories,
       opportunities,
     };
+  }
+
+  /**
+   * Private admin-only profitability analysis (reusable by Social strategy & future Agente Ads).
+   * Strictly separated from public content generation tools.
+   */
+  async analyzePrivateProfitability(workspaceId: string, limit = 15): Promise<{
+    audience: 'internal_admin_only';
+    items: PrivateProfitabilityItem[];
+  }> {
+    const products = await this.prisma.product.findMany({
+      where: {
+        workspaceId,
+        variants: {
+          some: {
+            cost: { not: null },
+            inventoryItem: { available: { gt: 0 } },
+          },
+        },
+      },
+      select: {
+        id: true,
+        title: true,
+        variants: {
+          select: {
+            sku: true,
+            price: true,
+            cost: true,
+            inventoryItem: { select: { available: true } },
+          },
+        },
+      },
+      take: 100,
+    });
+
+    const items: PrivateProfitabilityItem[] = [];
+    for (const prod of products) {
+      const available = prod.variants.reduce((sum, v) => sum + (v.inventoryItem?.available ?? 0), 0);
+      const primary = prod.variants[0];
+      const price = primary ? Number(primary.price) : 0;
+      const cost = primary?.cost ? Number(primary.cost) : 0;
+      if (available <= 0 || price <= 0 || cost <= 0) continue;
+      const marginPct = Math.round(((price - cost) / price) * 1000) / 10;
+      items.push({
+        productId: prod.id,
+        title: prod.title,
+        sku: primary?.sku ?? null,
+        price,
+        cost,
+        verifiableMarginPct: marginPct,
+        availableStock: available,
+      });
+    }
+
+    items.sort((a, b) => b.verifiableMarginPct - a.verifiableMarginPct);
+    return {
+      audience: 'internal_admin_only',
+      items: items.slice(0, Math.min(Math.max(limit, 1), 30)),
+    };
+  }
+
+  /**
+   * Controlled periodic editorial planning cycle for one workspace:
+   * - Inspects TryPost calendar & analytics (read-only)
+   * - Detects content gaps (e.g. < 2 upcoming posts/drafts)
+   * - Analyzes catalog opportunities (public-safe)
+   * - Creates at most 1 deduplicated local editorial proposal (`IDEA`, NEVER schedules/publishes)
+   *   unless `dryRun: true`.
+   */
+  async runEditorialPlanningCycle(
+    workspaceId: string,
+    options?: { dryRun?: boolean; trigger?: 'worker' | 'manual' },
+  ): Promise<{
+    workspaceId: string;
+    skippedReason?: string;
+    calendarPostsCount: number;
+    contentGapDetected: boolean;
+    analyticsAvailable: boolean;
+    opportunitiesFound: number;
+    proposalsCreated: number;
+    dryRun: boolean;
+  }> {
+    const policy = await this.getOrCreatePolicy(workspaceId);
+    const trigger = options?.trigger ?? 'manual';
+    const dryRun = Boolean(options?.dryRun);
+
+    if (policy.paused) {
+      return {
+        workspaceId,
+        skippedReason: 'paused',
+        calendarPostsCount: 0,
+        contentGapDetected: false,
+        analyticsAvailable: false,
+        opportunitiesFound: 0,
+        proposalsCreated: 0,
+        dryRun,
+      };
+    }
+
+    if (trigger === 'worker' && policy.autonomyMode !== 'AUTOMATIC') {
+      return {
+        workspaceId,
+        skippedReason: `autonomy_mode_${policy.autonomyMode.toLowerCase()}`,
+        calendarPostsCount: 0,
+        contentGapDetected: false,
+        analyticsAvailable: false,
+        opportunitiesFound: 0,
+        proposalsCreated: 0,
+        dryRun,
+      };
+    }
+
+    const [auth, analysis] = await Promise.all([
+      this.trypostConnections.openAuth(workspaceId),
+      this.analyzeBusinessOpportunities(workspaceId),
+    ]);
+
+    let calendarPostsCount = 0;
+    let analyticsAvailable = false;
+    if (auth) {
+      const [posts, analytics] = await Promise.all([
+        this.trypostClient.listPosts(auth).catch(() => []),
+        this.trypostClient.getWorkspaceAnalytics(auth).catch(() => null),
+      ]);
+      calendarPostsCount = posts.length;
+      analyticsAvailable = Boolean(analytics);
+    }
+
+    const contentGapDetected = calendarPostsCount < 2;
+    let proposalsCreated = 0;
+
+    if (!dryRun && contentGapDetected && analysis.opportunities.length > 0) {
+      const top = analysis.opportunities[0];
+      const existing = await this.prisma.socialContentItem.findFirst({
+        where: { workspaceId, title: { equals: top.title, mode: 'insensitive' } },
+      });
+      if (!existing) {
+        await this.createContentItem(workspaceId, {
+          kind: 'IDEA',
+          title: top.title,
+          caption: top.rationale,
+          objective: 'Cobertura de espacio en calendario editorial',
+          pillar: top.suggestedPillar,
+          productionMode: 'ASSISTED',
+        });
+        proposalsCreated = 1;
+      }
+    }
+
+    await this.prisma.socialAgentEvent
+      .create({
+        data: {
+          workspaceId,
+          eventType: 'editorial_planning_cycle',
+          summary: `Revisión editorial (${trigger}${dryRun ? ', simulación' : ''}): ${calendarPostsCount} publicación(es) en TryPost, ${analysis.opportunities.length} oportunidad(es), ${proposalsCreated} propuesta(s) generada(s).`,
+          severity: 'info',
+          metadata: {
+            trigger,
+            dryRun,
+            calendarPostsCount,
+            contentGapDetected,
+            analyticsAvailable,
+            proposalsCreated,
+          },
+        },
+      })
+      .catch(() => undefined);
+
+    return {
+      workspaceId,
+      calendarPostsCount,
+      contentGapDetected,
+      analyticsAvailable,
+      opportunitiesFound: analysis.opportunities.length,
+      proposalsCreated,
+      dryRun,
+    };
+  }
+
+  /**
+   * Invoked by Crossmart Worker (`MaintenanceProcessor`). Strictly only processes workspaces
+   * whose owner explicitly authorized `autonomyMode === 'AUTOMATIC'` and `paused === false`.
+   */
+  async runAuthorizedPeriodicPlanning(): Promise<{ checked: number; executed: number }> {
+    const authorized = await this.prisma.socialBudgetPolicy.findMany({
+      where: { paused: false, autonomyMode: 'AUTOMATIC' },
+      select: { workspaceId: true },
+    });
+    let executed = 0;
+    for (const row of authorized) {
+      const res = await this.runEditorialPlanningCycle(row.workspaceId, {
+        dryRun: false,
+        trigger: 'worker',
+      });
+      if (!res.skippedReason) executed += 1;
+    }
+    return { checked: authorized.length, executed };
   }
 
   /**

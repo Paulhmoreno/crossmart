@@ -291,6 +291,30 @@ export class TryPostClient {
     }
   }
 
+  async addPostNote(
+    auth: TryPostAuth,
+    postId: string,
+    body: string,
+  ): Promise<{ id: string | null; raw: Record<string, unknown> }> {
+    const res = await this.request<Record<string, unknown>>(auth, 'POST', `/posts/${postId}/notes`, {
+      body,
+    });
+    const data = (res.data as Record<string, unknown> | undefined) ?? res;
+    return {
+      id: typeof data.id === 'string' || typeof data.id === 'number' ? String(data.id) : null,
+      raw: data,
+    };
+  }
+
+  async listLabels(auth: TryPostAuth): Promise<{ supported: boolean; labels: Array<Record<string, unknown>> }> {
+    try {
+      const raw = await this.fetchFirstAvailable<unknown>(auth, ['/labels', '/tags']);
+      return { supported: true, labels: asArray(raw) };
+    } catch {
+      return { supported: false, labels: [] };
+    }
+  }
+
   async getQueueSlots(auth: TryPostAuth, channelId: string): Promise<Array<Record<string, unknown>>> {
     return asArray(
       await this.fetchFirstAvailable<unknown>(auth, [
