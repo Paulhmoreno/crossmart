@@ -8,17 +8,21 @@ describe('Agente Social — Universalidad, Aislamiento, Aprobaciones y Presupues
   it('genera oportunidades distintas para dos negocios de sectores completamente diferentes sin hardcoding', async () => {
     const prismaCoffee = {
       product: {
+        count: vi.fn().mockResolvedValueOnce(2).mockResolvedValueOnce(1).mockResolvedValueOnce(1),
+        groupBy: vi.fn().mockResolvedValue([{ productType: 'Café de Especialidad', _count: { _all: 1 } }]),
         findMany: vi.fn().mockResolvedValue([
           {
             id: 'p-coffee-1',
             title: 'Café de Especialidad Bourbon Lavado 500g',
             productType: 'Café de Especialidad',
+            media: [{ url: 'https://cdn.example.com/coffee.jpg' }],
             variants: [{ sku: 'CAF-01', price: '18.00', cost: '9.00', inventoryItem: { available: 12 } }],
           },
           {
             id: 'p-coffee-out',
             title: 'Geisha Edición Agotada',
             productType: 'Café de Especialidad',
+            media: [],
             variants: [{ sku: 'CAF-OUT', price: '45.00', cost: '20.00', inventoryItem: { available: 0 } }],
           },
         ]),
@@ -27,11 +31,14 @@ describe('Agente Social — Universalidad, Aislamiento, Aprobaciones y Presupues
 
     const prismaVet = {
       product: {
+        count: vi.fn().mockResolvedValueOnce(1).mockResolvedValueOnce(1).mockResolvedValueOnce(1),
+        groupBy: vi.fn().mockResolvedValue([{ productType: 'Nutrición Veterinaria', _count: { _all: 1 } }]),
         findMany: vi.fn().mockResolvedValue([
           {
             id: 'p-vet-1',
             title: 'Alimento Hipoalergénico Perros Adultos 10kg',
             productType: 'Nutrición Veterinaria',
+            media: [],
             variants: [{ sku: 'VET-01', price: '62.00', cost: '36.00', inventoryItem: { available: 8 } }],
           },
         ]),

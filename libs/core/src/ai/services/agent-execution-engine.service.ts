@@ -19,6 +19,7 @@ const TRANSIENT_RETRY_DELAY_MS = 800;
 
 /** Detects unexpected CJK/Hangul characters that multilingual models sometimes leak into es/en text. */
 const UNEXPECTED_FOREIGN_SCRIPT_RE = /[\uAC00-\uD7AF\u1100-\u11FF\u3130-\u318F\u4E00-\u9FFF\u3040-\u30FF]/g;
+const RAW_TOOL_CALL_TAG_RE = /<tool_call>[\s\S]*?<\/tool_call>/gi;
 
 export type AgentExecutionPhase =
   | 'thinking'
@@ -120,11 +121,12 @@ export function buildLocalePolicyPrompt(locale?: string | null): string {
 }
 
 export function sanitizeUnexpectedScripts(text: string, locale?: string | null): string {
+  let cleaned = text.replace(RAW_TOOL_CALL_TAG_RE, '');
   const normalized = (locale ?? 'es-EC').toLowerCase();
-  if (!normalized.startsWith('es') && !normalized.startsWith('en')) return text;
-  if (!UNEXPECTED_FOREIGN_SCRIPT_RE.test(text)) return text;
+  if (!normalized.startsWith('es') && !normalized.startsWith('en')) return cleaned;
+  if (!UNEXPECTED_FOREIGN_SCRIPT_RE.test(cleaned)) return cleaned;
   UNEXPECTED_FOREIGN_SCRIPT_RE.lastIndex = 0;
-  return text.replace(UNEXPECTED_FOREIGN_SCRIPT_RE, '').replace(/[ \t]{2,}/g, ' ');
+  return cleaned.replace(UNEXPECTED_FOREIGN_SCRIPT_RE, '').replace(/[ \t]{2,}/g, ' ');
 }
 
 function isToolUse(block: AiContentBlock): block is AiToolUseBlock {

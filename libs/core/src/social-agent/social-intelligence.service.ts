@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { type Prisma, PrismaService } from '@crossmart/database';
 import type { Actor } from '../activity/entities/actor.js';
+import { assertPublicContentSafe } from '../ai/rules/public-content-guard.js';
 import { TryPostClient } from './trypost.client.js';
 import { TryPostConnectionService } from './trypost-connection.service.js';
 
@@ -130,89 +131,117 @@ export class SocialIntelligenceService {
   }
 
   /**
-   * Analyzes real workspace catalog & inventory without any business-specific hardcoding.
-   * Excludes out-of-stock products from automatic commercial promotion and never invents margins.
+   * Analyzes the FULL workspace catalog using real aggregate counts (never truncating at 100)
+   * and selects commercially reasoned candidates without exposing internal costs/margins in
+   * public-facing rationales. Excludes out-of-stock products from automatic promotion and avoids
+   * over-prioritizing single-unit items.
    */
   async analyzeBusinessOpportunities(workspaceId: string): Promise<{
     totalProducts: number;
     inStockProducts: number;
+    eligibleProducts: number;
+    analyzedSample: number;
     topCategories: string[];
     opportunities: CommercialOpportunity[];
   }> {
-    const products = await this.prisma.product.findMany({
-      where: { workspaceId },
-      include: {
-        variants: {
-          include: { inventoryItem: true },
-        },
-      },
-      orderBy: { createdAt: 'desc' },
-      take: 100,
-    });
+    const [totalProducts, inStockProducts, eligibleProducts, categoryGroups, candidates] =
+      await Promise.all([
+        this.prisma.product.count({ where: { workspaceId } }),
+        this.prisma.product.count({
+          where: {
+            workspaceId,
+            variants: { some: { inventoryItem: { available: { gt: 0 } } } },
+          },
+        }),
+        this.prisma.product.count({
+          where: {
+            workspaceId,
+            variants: { some: { inventoryItem: { available: { gte: 2 } } } },
+          },
+        }),
+        this.prisma.product.groupBy({
+          by: ['productType'],
+          where: {
+            workspaceId,
+            productType: { not: null },
+            variants: { some: { inventoryItem: { available: { gt: 0 } } } },
+          },
+          _count: { _all: true },
+          orderBy: { _count: { productType: 'desc' } },
+          take: 8,
+        }),
+        this.prisma.product.findMany({
+          where: {
+            workspaceId,
+            variants: { some: { inventoryItem: { available: { gt: 0 } } } },
+          },
+          include: {
+            variants: {
+              include: { inventoryItem: true },
+            },
+            media: {
+              orderBy: { position: 'asc' },
+              take: 1,
+              select: { url: true },
+            },
+          },
+          orderBy: { updatedAt: 'desc' },
+          take: 120,
+        }),
+      ]);
 
-    const categoryCounts = new Map<string, number>();
+    const topCategories = categoryGroups
+      .map((g) => g.productType)
+      .filter((c): c is string => Boolean(c && c.trim()));
+
+    const scored = candidates
+      .map((prod) => {
+        const totalAvailable = prod.variants.reduce(
+          (sum, v) => sum + (v.inventoryItem?.available ?? 0),
+          0,
+        );
+        const primary = prod.variants[0];
+        const price = primary ? Number(primary.price) : null;
+        const hasImage = prod.media.length > 0;
+        // Prefer products with >= 2 units in stock and real photography to avoid wasting
+        // creative effort on single-unit items.
+        const score =
+          (totalAvailable >= 5 ? 30 : totalAvailable >= 2 ? 15 : 2) +
+          (hasImage ? 20 : 0) +
+          (price && price > 0 ? 10 : 0);
+        return { prod, totalAvailable, primary, price, hasImage, score };
+      })
+      .filter((entry) => entry.totalAvailable > 0)
+      .sort((a, b) => b.score - a.score || b.totalAvailable - a.totalAvailable);
+
     const opportunities: CommercialOpportunity[] = [];
-    let inStockProducts = 0;
-
-    for (const prod of products) {
-      if (prod.productType) {
-        categoryCounts.set(prod.productType, (categoryCounts.get(prod.productType) ?? 0) + 1);
-      }
-      const totalAvailable = prod.variants.reduce(
-        (sum, v) => sum + (v.inventoryItem?.available ?? 0),
-        0,
-      );
-      if (totalAvailable <= 0) continue; // Never promote out-of-stock automatically
-      inStockProducts += 1;
-
-      const primary = prod.variants[0];
-      const price = primary ? Number(primary.price) : null;
-      const cost = primary?.cost ? Number(primary.cost) : null;
-      const verifiableMarginPct =
-        price && cost && price > 0 && cost > 0
-          ? Math.round(((price - cost) / price) * 1000) / 10
-          : null;
-
-      if (totalAvailable >= 5 && opportunities.length < 4) {
-        opportunities.push({
-          type: 'HIGH_STOCK',
-          title: `Impulsar rotación: ${prod.title}`,
-          rationale: `Disponibilidad verificada de ${totalAvailable} unidades en catálogo.`,
-          productId: prod.id,
-          sku: primary?.sku ?? null,
-          price,
-          availableStock: totalAvailable,
-          verifiableMarginPct,
-          suggestedPillar: 'commercial',
-        });
-      } else if (verifiableMarginPct !== null && verifiableMarginPct >= 30 && opportunities.length < 6) {
-        opportunities.push({
-          type: 'HIGH_MARGIN',
-          title: `Destacar valor y margen: ${prod.title}`,
-          rationale: `Margen verificable de ${verifiableMarginPct}% sobre precio base con ${totalAvailable} unidad(es) disponible(s).`,
-          productId: prod.id,
-          sku: primary?.sku ?? null,
-          price,
-          availableStock: totalAvailable,
-          verifiableMarginPct,
-          suggestedPillar: 'commercial',
-        });
-      }
+    for (const entry of scored) {
+      if (opportunities.length >= 6) break;
+      if (entry.totalAvailable < 2 && eligibleProducts >= 3) continue;
+      opportunities.push({
+        type: entry.totalAvailable >= 5 ? 'HIGH_STOCK' : 'CATEGORY_SPOTLIGHT',
+        title: `Destacar en catálogo: ${entry.prod.title}`,
+        rationale: `Disponibilidad verificada de ${entry.totalAvailable} unidad(es)${
+          entry.price ? ` · precio público $${entry.price.toFixed(2)}` : ''
+        }${entry.hasImage ? ' · cuenta con fotografía real en catálogo' : ''}.`,
+        productId: entry.prod.id,
+        sku: entry.primary?.sku ?? null,
+        price: entry.price,
+        availableStock: entry.totalAvailable,
+        // Never expose internal margin percentage into public-copy opportunities
+        verifiableMarginPct: null,
+        suggestedPillar: 'commercial',
+      });
     }
-
-    const topCategories = [...categoryCounts.entries()]
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 5)
-      .map(([cat]) => cat);
 
     if (topCategories.length > 0) {
       opportunities.push({
         type: 'EDUCATIONAL',
         title: `Guía práctica para elegir en ${topCategories[0]}`,
-        rationale: `Categoría principal del catálogo (${topCategories[0]}); contenido educativo fortalece autoridad sin depender únicamente de venta directa.`,
+        rationale: `Categoría principal con stock verificado (${topCategories[0]}); contenido educativo fortalece autoridad sin depender únicamente de venta directa.`,
         suggestedPillar: 'educational',
       });
-    } else if (products.length > 0) {
+    } else if (totalProducts > 0) {
       opportunities.push({
         type: 'EDUCATIONAL',
         title: 'Contenido educativo sobre cómo elegir y aprovechar el catálogo',
@@ -222,8 +251,10 @@ export class SocialIntelligenceService {
     }
 
     return {
-      totalProducts: products.length,
+      totalProducts,
       inStockProducts,
+      eligibleProducts,
+      analyzedSample: candidates.length,
       topCategories,
       opportunities,
     };
@@ -324,6 +355,7 @@ export class SocialIntelligenceService {
       targetChannelIds?: string[];
     },
   ) {
+    assertPublicContentSafe(`${input.title}\n${input.caption ?? ''}`, 'content piece');
     const item = await this.prisma.socialContentItem.create({
       data: {
         workspaceId,
@@ -375,6 +407,7 @@ export class SocialIntelligenceService {
       where: { id: itemId, workspaceId },
     });
     if (!existing) throw new NotFoundException('Social content item not found.');
+    assertPublicContentSafe(`${patch.title ?? ''}\n${patch.caption ?? ''}`, 'content piece');
 
     const contentChanged =
       patch.title !== undefined ||
@@ -412,6 +445,7 @@ export class SocialIntelligenceService {
       where: { id: itemId, workspaceId },
     });
     if (!item) throw new NotFoundException('Social content item not found.');
+    assertPublicContentSafe(`${item.title}\n${item.caption ?? ''}`, 'TryPost content');
 
     const updated = await this.prisma.socialContentItem.update({
       where: { id: item.id },
@@ -478,6 +512,7 @@ export class SocialIntelligenceService {
       where: { id: itemId, workspaceId },
     });
     if (!item) throw new NotFoundException('Social content item not found.');
+    assertPublicContentSafe(`${item.title}\n${item.caption ?? ''}`, 'TryPost content');
 
     const policy = await this.getOrCreatePolicy(workspaceId);
     if (policy.paused) {

@@ -42,6 +42,43 @@ export class SocialAgentController {
     return this.agent.getOperationalOverview(workspaceId);
   }
 
+  @Get('conversations')
+  @RequirePermission(WorkspacePermission.ViewProducts)
+  @ApiOperation({ summary: 'List persistent Social Agent Supervisor conversations' })
+  listConversations(@Param(WORKSPACE_ID_PARAM, ParseUUIDPipe) workspaceId: string) {
+    return this.agent.listSupervisorConversations(workspaceId);
+  }
+
+  @Get('conversations/latest')
+  @RequirePermission(WorkspacePermission.ViewProducts)
+  @ApiOperation({ summary: 'Get or create latest persistent Social Agent Supervisor conversation' })
+  getLatestConversation(
+    @Param(WORKSPACE_ID_PARAM, ParseUUIDPipe) workspaceId: string,
+    @Query('conversationId') conversationId?: string,
+  ) {
+    return this.agent.getOrCreateLatestConversation(workspaceId, conversationId);
+  }
+
+  @Post('conversations')
+  @RequirePermission(WorkspacePermission.EditProducts)
+  @ApiOperation({ summary: 'Create a new persistent Social Agent Supervisor conversation' })
+  createConversation(
+    @Param(WORKSPACE_ID_PARAM, ParseUUIDPipe) workspaceId: string,
+    @Body() body?: { title?: string },
+  ) {
+    return this.agent.createSupervisorConversation(workspaceId, body?.title);
+  }
+
+  @Delete('conversations/:conversationId')
+  @RequirePermission(WorkspacePermission.EditProducts)
+  @HttpCode(HttpStatus.NO_CONTENT)
+  deleteConversation(
+    @Param(WORKSPACE_ID_PARAM, ParseUUIDPipe) workspaceId: string,
+    @Param('conversationId', ParseUUIDPipe) conversationId: string,
+  ) {
+    return this.agent.deleteSupervisorConversation(workspaceId, conversationId);
+  }
+
   @Post('supervisor/chat')
   @RequirePermission(WorkspacePermission.EditProducts)
   @HttpCode(HttpStatus.OK)
@@ -51,6 +88,7 @@ export class SocialAgentController {
     @Body()
     body: {
       message: string;
+      conversationId?: string | null;
       history?: Array<{ role: 'user' | 'assistant'; text: string }>;
       locale?: string;
     },
@@ -66,6 +104,7 @@ export class SocialAgentController {
     @Body()
     body: {
       message: string;
+      conversationId?: string | null;
       history?: Array<{ role: 'user' | 'assistant'; text: string }>;
       locale?: string;
     },

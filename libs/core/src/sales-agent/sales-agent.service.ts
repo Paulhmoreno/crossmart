@@ -22,6 +22,7 @@ import {
   type AgentStreamSink,
   type ExecutableAgentTool,
 } from '../ai/services/agent-execution-engine.service.js';
+import { redactConfidentialLeaks } from '../ai/rules/public-content-guard.js';
 import { ChatwootClient } from '../chatwoot/chatwoot.client.js';
 import { ChatwootConnectionsService } from '../chatwoot/chatwoot-connections.service.js';
 import { AgentConfigsService, type SalesCommercialPolicy } from './agent-configs.service.js';
@@ -1135,7 +1136,7 @@ export class SalesAgentService {
     );
 
     return {
-      text: result.text,
+      text: redactConfidentialLeaks(result.text),
       toolsUsed: result.toolsUsed,
       handoffReason,
       identifiedProductId: identifiedProduct?.productId ?? null,

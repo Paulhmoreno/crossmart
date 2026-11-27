@@ -194,11 +194,16 @@ export class TryPostClient {
     auth: TryPostAuth,
     input: TryPostDraftInput,
   ): Promise<{ id: string; status: string; raw: Record<string, unknown> }> {
+    const primaryAccountId = input.channelIds[0];
     const payload: Record<string, unknown> = {
       content: input.content,
+      ...(primaryAccountId ? { social_account_id: primaryAccountId } : {}),
       channel_ids: input.channelIds,
+      social_account_ids: input.channelIds,
       status: input.status,
-      ...(input.mediaTokens?.length ? { media_tokens: input.mediaTokens } : {}),
+      ...(input.mediaTokens?.length
+        ? { media_tokens: input.mediaTokens, upload_tokens: input.mediaTokens }
+        : {}),
       ...(input.status === 'scheduled' && input.scheduledAt
         ? { scheduled_at: input.scheduledAt }
         : {}),
@@ -214,6 +219,76 @@ export class TryPostClient {
     }
 
     return { id: postId, status: str(data.status, input.status), raw: data };
+  }
+
+  async updatePost(
+    auth: TryPostAuth,
+    postId: string,
+    input: { content?: string; channelIds?: string[]; mediaTokens?: string[] },
+  ): Promise<{ id: string; status: string; raw: Record<string, unknown> }> {
+    const payload: Record<string, unknown> = {
+      ...(input.content !== undefined ? { content: input.content } : {}),
+      ...(input.channelIds?.length
+        ? { channel_ids: input.channelIds, social_account_ids: input.channelIds }
+        : {}),
+      ...(input.mediaTokens?.length
+        ? { media_tokens: input.mediaTokens, upload_tokens: input.mediaTokens }
+        : {}),
+    };
+    const res = await this.request<Record<string, unknown>>(auth, 'PUT', `/posts/${postId}`, payload);
+    const data = (res.data as Record<string, unknown> | undefined) ?? res;
+    return { id: str(data.id, postId), status: str(data.status, 'draft'), raw: data };
+  }
+
+  async uploadMedia(
+    auth: TryPostAuth,
+    input: { buffer: Buffer; filename: string; contentType: string },
+  ): Promise<{ uploadToken: string; id: string | null; url: string | null; raw: Record<string, unknown> }> {
+    const url = `${auth.baseUrl.replace(/\/+$/, '')}/uploads`;
+    const form = new FormData();
+    const blob = new Blob([new Uint8Array(input.buffer)], { type: input.contentType });
+    form.append('media', blob, input.filename);
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${auth.apiKey}`,
+        Accept: 'application/json',
+      },
+      body: form,
+      signal: AbortSignal.timeout(30_000),
+    });
+
+    const text = await response.text();
+    let parsed: Record<string, unknown> = {};
+    try {
+      parsed = text ? (JSON.parse(text) as Record<string, unknown>) : {};
+    } catch {
+      parsed = { message: text.slice(0, ERROR_PREVIEW_LEN) };
+    }
+    if (!response.ok) {
+      const msg = typeof parsed.message === 'string' ? parsed.message : `HTTP ${response.status}`;
+      throw new Error(`TryPost media upload error (${response.status}): ${msg}`);
+    }
+    const data = (parsed.data as Record<string, unknown> | undefined) ?? parsed;
+    const uploadToken = str(data.upload_token ?? data.token ?? data.id);
+    if (!uploadToken) {
+      throw new Error('TryPost upload succeeded without returning an upload_token.');
+    }
+    return {
+      uploadToken,
+      id: typeof data.id === 'string' || typeof data.id === 'number' ? String(data.id) : null,
+      url: typeof data.url === 'string' ? data.url : null,
+      raw: data,
+    };
+  }
+
+  async listMedia(auth: TryPostAuth): Promise<Array<Record<string, unknown>>> {
+    try {
+      return asArray(await this.fetchFirstAvailable<unknown>(auth, ['/media', '/uploads']));
+    } catch {
+      return [];
+    }
   }
 
   async getQueueSlots(auth: TryPostAuth, channelId: string): Promise<Array<Record<string, unknown>>> {
