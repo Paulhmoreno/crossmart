@@ -46,10 +46,51 @@ export class OdooSourceController {
   @Get('capabilities')
   @RequirePermission(WorkspacePermission.ViewChannels)
   @ApiOperation({
-    summary: 'Get Odoo crossmart_connector module version, granted capabilities, and event metrics',
+    summary: 'Get Odoo crossmart_connector pairing status, module version, capabilities, and event metrics',
   })
   async getCapabilities(@Param(WORKSPACE_ID_PARAM, ParseUUIDPipe) workspaceId: string) {
     return this.eventIngestion.getOperationalCapabilities(workspaceId);
+  }
+
+  @Post('pairing/generate')
+  @RequirePermission(WorkspacePermission.ManageChannels)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Generate or rotate cryptographic HMAC pairing credentials for crossmart_connector',
+  })
+  async generatePairing(
+    @Param(WORKSPACE_ID_PARAM, ParseUUIDPipe) workspaceId: string,
+    @Body() body: { rotate?: boolean },
+    @CurrentActor() actor: Actor,
+  ) {
+    return this.eventIngestion.generatePairingCredentials(
+      workspaceId,
+      actor,
+      Boolean(body?.rotate),
+    );
+  }
+
+  @Post('pairing/revoke')
+  @RequirePermission(WorkspacePermission.ManageChannels)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Revoke crossmart_connector pairing credentials immediately',
+  })
+  async revokePairing(
+    @Param(WORKSPACE_ID_PARAM, ParseUUIDPipe) workspaceId: string,
+    @CurrentActor() actor: Actor,
+  ) {
+    return this.eventIngestion.revokePairingCredentials(workspaceId, actor);
+  }
+
+  @Post('pairing/test')
+  @RequirePermission(WorkspacePermission.ManageChannels)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Verify bidirectional communication between Crossmart and Odoo crossmart_connector (read-only)',
+  })
+  async testPairing(@Param(WORKSPACE_ID_PARAM, ParseUUIDPipe) workspaceId: string) {
+    return this.eventIngestion.testModulePairing(workspaceId);
   }
 
   @Get()

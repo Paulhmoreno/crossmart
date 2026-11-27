@@ -17,6 +17,7 @@ import {
   OdooOperationalClient,
   type OdooOperationalAuth,
 } from '../../odoo/client/odoo-operational.client.js';
+import { OdooCredentialsVault } from '../../odoo/services/odoo-credentials.vault.js';
 import { ORDER_NOT_FOUND } from '../orders.constants.js';
 
 export type StoreInvoicingPolicy =
@@ -141,6 +142,7 @@ export class OrderOrchestrationService {
     private readonly ledger: InventoryLedger,
     private readonly events: CatalogEventBus,
     private readonly odooClient: OdooOperationalClient,
+    private readonly odooVault?: OdooCredentialsVault,
   ) {}
 
   private async resolveOdooOperationalAuth(workspaceId: string): Promise<OdooOperationalAuth | null> {
@@ -150,8 +152,13 @@ export class OrderOrchestrationService {
     });
     if (!conn) return null;
     const settings = parseJsonObject(conn.settings);
-    const secret =
-      typeof settings.eventWebhookSecret === 'string' ? settings.eventWebhookSecret.trim() : '';
+    let secret = '';
+    if (typeof settings.sealedEventSecret === 'string' && settings.sealedEventSecret && this.odooVault) {
+      const opened = await this.odooVault.open(workspaceId, settings.sealedEventSecret);
+      secret = opened.apiKey?.trim() ?? '';
+    } else if (typeof settings.eventWebhookSecret === 'string') {
+      secret = settings.eventWebhookSecret.trim();
+    }
     if (!secret) return null;
     return { url: conn.url, connectionId: conn.id, apiSecret: secret };
   }

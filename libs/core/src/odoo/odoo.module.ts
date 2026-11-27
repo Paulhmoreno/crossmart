@@ -26,6 +26,7 @@ import { OdooSyncService } from './services/odoo-sync.service.js';
   exports: [
     OdooReadOnlyClient,
     OdooOperationalClient,
+    OdooCredentialsVault,
     OdooConnectionService,
     OdooSyncService,
     OdooSyncQueue,
